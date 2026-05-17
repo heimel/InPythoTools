@@ -8,13 +8,18 @@ wraps it in a pandas DataFrame.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+import re
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from scipy.io import loadmat
+from scipy.io import loadmat, savemat
 from scipy.io.matlab import mat_struct
+
+
+_MATLAB_FIELD_RE = re.compile(r"^[A-Za-z]\w*$")
 
 
 def _todict(obj: mat_struct) -> dict[str, Any]:
@@ -101,14 +106,62 @@ def _struct_array_to_records(value: Any) -> list[dict[str, Any]]:
 
     raise TypeError("The selected MATLAB variable does not appear to be a struct array.")
 
+
+def _is_matlab_opaque_table(value: Any) -> bool:
+    """Return True for MATLAB table objects that SciPy loaded as MCOS placeholders."""
+    return (
+        isinstance(value, tuple)
+        and len(value) >= 3
+        and value[1] == b"MCOS"
+        and value[2] == b"table"
+    )
+
+
+def _events_from_markers(markers: Any) -> list[dict[str, Any]] | None:
+    """Recreate a NoviTrack events table from marker structs when possible."""
+    if not isinstance(markers, list):
+        return None
+
+    events: list[dict[str, Any]] = []
+    for marker in markers:
+        if not isinstance(marker, Mapping):
+            return None
+        if "time" not in marker or "marker" not in marker:
+            return None
+        events.append({"time": marker["time"], "event": marker["marker"]})
+    return events
+
+
+def _repair_known_matlab_tables(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace unsupported MATLAB table placeholders with useful Python records.
+
+    MATLAB tables are stored as class objects. SciPy cannot reconstruct those
+    objects, so it returns an opaque MCOS tuple instead. For NoviTrack
+    databases, ``record.measures.events`` is derived from
+    ``record.measures.markers`` as columns ``time`` and ``event``. Rebuilding it
+    here prevents a save/load round trip from preserving the unusable MCOS
+    placeholder.
+    """
+    for record in records:
+        measures = record.get("measures")
+        if not isinstance(measures, dict):
+            continue
+
+        if _is_matlab_opaque_table(measures.get("events")):
+            events = _events_from_markers(measures.get("markers"))
+            if events is not None:
+                measures["events"] = events
+
+    return records
+
 def load_mat_database(filename: str | Path) -> pd.DataFrame:
-    """Load MATLAB database and convert to dataframe"""
-    db = loadmat_as_dataframe(filename, variable_name = 'db')
+    """Load a MATLAB test database named ``db`` and convert it to a DataFrame."""
+    db = loadmat_as_dataframe(filename, variable_name="db")
     return db
 
 def loadmat_as_dataframe(
     filename: str | Path,
-    variable_name: Optional[str] = 'None',
+    variable_name: Optional[str] = None,
     *,
     squeeze_me: bool = True,
     struct_as_record: bool = False,
@@ -166,7 +219,7 @@ def loadmat_as_dataframe(
             f"Available variables: {names}"
         )
 
-    records = _struct_array_to_records(user_vars[variable_name])
+    records = _repair_known_matlab_tables(_struct_array_to_records(user_vars[variable_name]))
     
     db = pd.DataFrame.from_records(records)
 
@@ -176,3 +229,104 @@ def loadmat_as_dataframe(
         db = db[cols]
     
     return db 
+
+
+def _validate_matlab_field_name(name: str) -> None:
+    """Raise a clear error if a DataFrame column cannot be a MATLAB field."""
+    if not _MATLAB_FIELD_RE.match(name):
+        raise ValueError(
+            f"{name!r} is not a valid MATLAB struct field name. "
+            "Use a name that starts with a letter and contains only letters, "
+            "numbers, and underscores."
+        )
+
+
+def _is_missing_scalar(value: Any) -> bool:
+    """Return True for scalar pandas/numpy missing values, but not arrays."""
+    if isinstance(value, (np.ndarray, list, tuple, Mapping)):
+        return False
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _records_to_mat_struct_array(records: list[Mapping[str, Any]]) -> np.ndarray:
+    """Convert a list of dictionaries into a MATLAB-compatible struct array."""
+    if not records:
+        return np.empty((0, 0), dtype=object)
+
+    field_names = list(records[0].keys())
+    for field_name in field_names:
+        _validate_matlab_field_name(str(field_name))
+
+    struct_array = np.empty((1, len(records)), dtype=[(str(name), object) for name in field_names])
+
+    for index, record in enumerate(records):
+        for field_name in field_names:
+            struct_array[0, index][str(field_name)] = _convert_python_value_to_mat(record.get(field_name))
+
+    return struct_array
+
+
+def _convert_python_value_to_mat(value: Any) -> Any:
+    """Recursively convert Python values into values suitable for ``savemat``."""
+    if _is_missing_scalar(value):
+        return np.array([])
+
+    if isinstance(value, pd.Series):
+        value = value.to_dict()
+
+    if isinstance(value, pd.DataFrame):
+        return _records_to_mat_struct_array(value.to_dict(orient="records"))
+
+    if isinstance(value, Mapping):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            field_name = str(key)
+            _validate_matlab_field_name(field_name)
+            out[field_name] = _convert_python_value_to_mat(item)
+        return out
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if isinstance(value, (list, tuple)):
+        values = list(value)
+        if values and all(isinstance(item, Mapping) for item in values):
+            return _records_to_mat_struct_array(values)
+        converted = [_convert_python_value_to_mat(item) for item in values]
+        try:
+            return np.asarray(converted)
+        except ValueError:
+            return np.asarray(converted, dtype=object)
+
+    return value
+
+
+def save_mat_database(
+    db: pd.DataFrame,
+    filename: str | Path,
+    variable_name: str = "db",
+    *,
+    do_compression: bool = True,
+) -> None:
+    """Save a session DataFrame as a MATLAB struct-array database.
+
+    Each row becomes one MATLAB struct in ``variable_name``. Columns become
+    struct fields, including nested dictionaries such as ``measures``.
+    """
+    if not isinstance(db, pd.DataFrame):
+        raise TypeError("save_mat_database expects a pandas DataFrame.")
+
+    _validate_matlab_field_name(variable_name)
+    records = db.to_dict(orient="records")
+    mat_db = _records_to_mat_struct_array(records)
+
+    filename = Path(filename)
+    savemat(
+        filename,
+        {variable_name: mat_db},
+        do_compression=do_compression,
+        long_field_names=True,
+    )
