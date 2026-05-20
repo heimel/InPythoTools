@@ -56,6 +56,75 @@ def _thresholdlinear(x: np.ndarray) -> np.ndarray:
     return out
 
 
+def _load_npz_cache(filename: Path) -> dict[str, Any]:
+    logmsg(f"Loading neurotar data {filename}")
+    with np.load(filename, allow_pickle=False) as cache:
+        return {field: cache[field] for field in cache.files}
+
+
+def _save_npz_cache(filename: Path, neurotar_data: Mapping[str, Any]) -> None:
+    arrays = {}
+    for field, value in neurotar_data.items():
+        arr = np.asarray(value)
+        if arr.dtype == object:
+            continue
+        arrays[field] = arr
+    np.savez_compressed(filename, **arrays)
+
+
+def _load_tdms_data(filename: Path) -> dict[str, Any]:
+    try:
+        from nptdms import TdmsFile
+    except ImportError as exc:
+        raise ImportError(
+            "Reading Neurotar TDMS files requires the conda-forge package "
+            "`nptdms` in the gui_pyqt environment."
+        ) from exc
+
+    logmsg(f"Loading neurotar data {filename}")
+    tdms_file = TdmsFile.read(filename)
+    try:
+        group = tdms_file["Pp_Data"]
+    except KeyError as exc:
+        groups = ", ".join(group.name for group in tdms_file.groups())
+        raise KeyError(f"TDMS file {filename} has no Pp_Data group. Available groups: {groups}") from exc
+
+    neurotar_data: dict[str, Any] = {}
+    for channel in group.channels():
+        neurotar_data[channel.name] = np.asarray(channel[:])
+    neurotar_data = _pad_tdms_channels(neurotar_data)
+    return neurotar_data
+
+
+def _pad_tdms_channels(neurotar_data: dict[str, Any]) -> dict[str, Any]:
+    lengths = [len(value) for value in neurotar_data.values() if np.asarray(value).ndim > 0]
+    if not lengths:
+        return neurotar_data
+    n_samples = max(lengths)
+
+    for field, value in list(neurotar_data.items()):
+        arr = np.asarray(value)
+        if arr.ndim == 0 or arr.shape[0] == n_samples:
+            continue
+        if arr.shape[0] > n_samples:
+            neurotar_data[field] = arr[:n_samples]
+            continue
+
+        if np.issubdtype(arr.dtype, np.number):
+            padded = np.full(n_samples, np.nan, dtype=float)
+            padded[: arr.shape[0]] = arr.astype(float)
+        elif np.issubdtype(arr.dtype, np.datetime64):
+            padded = np.full(n_samples, np.datetime64("NaT"), dtype=arr.dtype)
+            padded[: arr.shape[0]] = arr
+        else:
+            padded = np.empty(n_samples, dtype=object)
+            padded[:] = None
+            padded[: arr.shape[0]] = arr
+        neurotar_data[field] = padded
+
+    return neurotar_data
+
+
 def _find_neurotar_folder(record: Any, params: Any) -> Path | None:
     base = Path(str(_get(params, "networkpathbase"))) / str(_get(record, "project")) / "Data_collection" / "Neurotar"
     date = str(_get(record, "date", ""))
@@ -120,11 +189,7 @@ def _trim_after_end_marker(neurotar_data: dict[str, Any], record: Any) -> dict[s
 
 
 def nt_load_neurotar_data(record: Any, params: Any | None = None) -> tuple[dict[str, Any], Path | None]:
-    """Load Neurotar data from a cached MATLAB ``.mat`` file.
-
-    The TDMS branch from MATLAB is not ported yet; current example data already
-    contains the cached ``neurotar_data`` MAT-file used by MATLAB.
-    """
+    """Load Neurotar data from Python cache, MATLAB cache, or TDMS."""
     if params is None:
         from nt_load_parameters import nt_load_parameters
 
@@ -137,29 +202,49 @@ def nt_load_neurotar_data(record: Any, params: Any | None = None) -> tuple[dict[
     close_bracket = folder.name.find("]")
     stem = folder.name[: close_bracket + 1] if close_bracket >= 0 else folder.name
     filename = folder / stem
+    npz_filename = filename.with_suffix(".npz")
     mat_filename = filename.with_suffix(".mat")
-    if not mat_filename.exists():
-        logmsg(f"Neurotar TDMS loading is not ported yet: {filename.with_suffix('.tdms')}")
+    tdms_filename = filename.with_suffix(".tdms")
+
+    source_filename = None
+    if npz_filename.exists():
+        neurotar_data = _load_npz_cache(npz_filename)
+        source_filename = npz_filename
+    elif mat_filename.exists():
+        logmsg(f"Loading neurotar data {mat_filename}")
+        mat = loadmat(mat_filename, squeeze_me=True, struct_as_record=False)
+        if "neurotar_data" not in mat:
+            logmsg(f"No neurotar_data variable found in {mat_filename}")
+            return {}, mat_filename
+
+        neurotar_data = _convert_mat_value(mat["neurotar_data"])
+        if not isinstance(neurotar_data, dict):
+            logmsg(f"Unsupported neurotar_data format in {mat_filename}")
+            return {}, mat_filename
+        source_filename = mat_filename
+    elif tdms_filename.exists():
+        try:
+            neurotar_data = _load_tdms_data(tdms_filename)
+        except (ImportError, KeyError, OSError, ValueError) as exc:
+            logmsg(str(exc))
+            return {}, tdms_filename
+        try:
+            _save_npz_cache(npz_filename, neurotar_data)
+            logmsg(f"Saved neurotar Python cache {npz_filename}")
+        except OSError as exc:
+            logmsg(f"Could not save neurotar Python cache {npz_filename}: {exc}")
+        source_filename = tdms_filename
+    else:
+        logmsg(f"Cannot find Neurotar data {mat_filename}, {npz_filename}, or {tdms_filename}")
         return {}, None
-
-    logmsg(f"Loading neurotar data {mat_filename}")
-    mat = loadmat(mat_filename, squeeze_me=True, struct_as_record=False)
-    if "neurotar_data" not in mat:
-        logmsg(f"No neurotar_data variable found in {mat_filename}")
-        return {}, mat_filename
-
-    neurotar_data = _convert_mat_value(mat["neurotar_data"])
-    if not isinstance(neurotar_data, dict):
-        logmsg(f"Unsupported neurotar_data format in {mat_filename}")
-        return {}, mat_filename
 
     neurotar_data = _trim_after_end_marker(neurotar_data, record)
 
     since_start = _as_array(neurotar_data.get("Since_track_start", []))
     ttl_outputs = _as_array(neurotar_data.get("TTL_outputs", []))
     if since_start.size == 0:
-        logmsg(f"Neurotar data has no Since_track_start in {mat_filename}")
-        return {}, mat_filename
+        logmsg(f"Neurotar data has no Since_track_start in {source_filename}")
+        return {}, source_filename
 
     trigger_frames = np.flatnonzero(ttl_outputs != 0)
     if trigger_frames.size:
@@ -206,7 +291,7 @@ def nt_load_neurotar_data(record: Any, params: Any | None = None) -> tuple[dict[
     neurotar_data["tailbase_Y"] = nan_vec.copy()
     neurotar_data["Coordinates"] = _get(params, "ARENA", 1)
 
-    return neurotar_data, mat_filename
+    return neurotar_data, source_filename
 
 
 __all__ = ["nt_load_neurotar_data"]
