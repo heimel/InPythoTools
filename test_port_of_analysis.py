@@ -4,11 +4,11 @@ from results_nttestrecord import results_nttestrecord
 
 def test_analysis():
     testpath = r"C:/Users/alexa/OneDrive/GitHub\Heimel/InPythoTools/test_data/"
-    filename = testpath + r"nttestdb_examples_ou.mat"
-#    filename = testpath + r"nttestdb_examples_ren.mat"
+#    filename = testpath + r"nttestdb_examples_ou.mat"
+    filename = testpath + r"nttestdb_examples.mat"
     db = load_mat_database(filename)
 #    record = db.iloc[-1].to_dict()
-    record = db.iloc[-1]
+    record = db.iloc[5]
     out = analyse_nttestrecord(record, verbose=False)
     results = results_nttestrecord(out)
     return results

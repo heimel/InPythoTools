@@ -24,7 +24,15 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
 
 
 def _as_array(value: Any) -> np.ndarray:
-    return np.asarray(value, dtype=float).reshape(-1)
+    try:
+        return np.asarray(value, dtype=float).reshape(-1)
+    except (TypeError, ValueError):
+        if isinstance(value, (list, tuple)):
+            parts = [_as_array(item) for item in value]
+            parts = [part for part in parts if part.size]
+            if parts:
+                return np.concatenate(parts)
+        return np.array([], dtype=float)
 
 
 def _median_filter_omitnan(x: np.ndarray, width: int) -> np.ndarray:

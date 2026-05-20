@@ -82,6 +82,7 @@ def nt_compute_event_measures(
     out.setdefault("behavior", {})
     stim_markers = set(str(marker) for marker in _get(params, "nt_stim_markers", []))
     stop_marker = str(_get(params, "nt_stop_marker", "t"))
+    has_movie_bounds = "max_time" in out and "min_time" in out
     max_time = float(_get(out, "max_time", np.nan))
     min_time = float(_get(out, "min_time", np.nan))
 
@@ -169,7 +170,11 @@ def nt_compute_event_measures(
             total_duration += duration
 
         marked_period = float(events["time"].iloc[-1] - events["time"].iloc[0])
-        movie_duration = max_time - min_time
+        if has_movie_bounds:
+            movie_duration = max_time - min_time
+        else:
+            logmsg("Unknown movie duration. Run track_behavior to retrieve this.")
+            movie_duration = np.nan
         # MATLAB code uses events.time(ind) here, even though ind indexes behaviors.
         event_times_at_behavior_indices = events.loc[behavior_indices, "time"].to_numpy() if n_occurrences else []
 

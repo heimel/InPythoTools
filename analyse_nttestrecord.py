@@ -178,7 +178,10 @@ def analyse_nttestrecord(
     if nt_data:
         measures = _session_measures(measures, nt_data, params)
         out["measures"] = measures
-        out = nt_compute_locations(out, nt_data, params)
+        if not bool(_get(params, "neurotar", False)):
+            out = nt_compute_locations(out, nt_data, params)
+        else:
+            logmsg("Compute locations is not yet implemented for neurotar.")
     else:
         out["measures"] = measures
 
