@@ -13,16 +13,19 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.io import savemat
 
 from logmsg import logmsg
+from nt_add_surgery_info import nt_add_surgery_info
 from nt_analyse_photometry import nt_analyse_photometry
+from nt_check_markers import nt_check_markers
 from nt_compute_event_measures import nt_compute_event_measures
 from nt_compute_locations import nt_compute_locations
-from nt_get_events import nt_get_events
 from nt_load_parameters import nt_load_parameters
 from nt_load_tracking_data import nt_load_tracking_data
 from nt_make_motion_snippets import nt_make_motion_snippets
 from nt_make_photometry_snippets import nt_make_photometry_snippets
+from nt_session_path import nt_session_path
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -39,39 +42,6 @@ def _as_array(value: Any) -> np.ndarray:
 
 def _record_label(record: Mapping[str, Any]) -> str:
     return str(_get(record, "sessionid", _get(record, "subject", "record")))
-
-
-def nt_check_markers(record: Mapping[str, Any], params: Any, *, verbose: bool = True) -> bool:
-    """Check basic marker start/stop consistency."""
-    measures = _get(record, "measures", {})
-    markers = _get(measures, "markers", None)
-    if markers is None or len(markers) == 0:
-        return True
-
-    stimulus_present = False
-    stim_markers = set(str(marker) for marker in _get(params, "nt_stim_markers", []))
-    stop_marker = str(_get(params, "nt_stop_marker", "t"))
-    msg = ""
-
-    for marker in markers:
-        marker_name = str(_get(marker, "marker"))
-        marker_time = float(_get(marker, "time", np.nan))
-        if marker_name == stop_marker:
-            if not stimulus_present:
-                msg = f"Stimulus stopped before starting at {marker_time:.2g} s"
-                break
-            stimulus_present = False
-        elif marker_name in stim_markers:
-            if stimulus_present:
-                msg = f"Stimulus started twice at {marker_time:.2g} s"
-                break
-            stimulus_present = True
-
-    if msg:
-        if verbose:
-            logmsg(f"{msg} in {_record_label(record)}")
-        return False
-    return True
 
 
 def _session_measures(measures: dict[str, Any], nt_data: Mapping[str, Any], params: Any) -> dict[str, Any]:
@@ -132,6 +102,7 @@ def analyse_nttestrecord(
     yaml_file: str | Path | None = None,
     session_path: str | Path | None = None,
     photometry_folder: str | Path | None = None,
+    save_snippets: bool | None = None,
     verbose: bool = True,
 ) -> dict[str, Any]:
     """Analyze one NoviTrack record and return an updated record dictionary."""
@@ -139,10 +110,15 @@ def analyse_nttestrecord(
     out.setdefault("measures", {})
 
     if params is None:
-        params = nt_load_parameters(out, yaml_file=yaml_file, apply_local_overrides=False)
+        params = nt_load_parameters(out, yaml_file=yaml_file)
+
+    if save_snippets is None:
+        save_snippets = bool(_get(params, "nt_save_snippets", True))
 
     if _get(params, "nt_seed", None):
         np.random.seed(int(_get(params, "nt_seed")))
+
+    out = nt_add_surgery_info(out, params)
 
     nt_data, trigger_times = nt_load_tracking_data(out, params, recompute=False, session_path=session_path)
     if not nt_data:
@@ -184,6 +160,19 @@ def analyse_nttestrecord(
         snippets = nt_make_photometry_snippets(photometry, measures, params)
 
     snippets = nt_make_motion_snippets(nt_data, measures, snippets, params)
+    if save_snippets:
+        if session_path is None:
+            folder, exists = nt_session_path(out, params)
+        else:
+            folder = Path(session_path)
+            exists = folder.is_dir()
+        if exists:
+            filename = folder / "nt_snippets.mat"
+            try:
+                savemat(str(filename), {"snippets": snippets}, do_compression=True, long_field_names=True)
+            except (OSError, TypeError, ValueError) as exc:
+                logmsg(f"Could not save snippets to {filename}: {exc}")
+
     measures = nt_compute_event_measures(snippets, measures, params)
 
     if nt_data:

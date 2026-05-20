@@ -1,0 +1,326 @@
+# nt_default_parameters.yaml Runs struct with default parameters for NoviTrack
+#
+# 2026, Alexander Heimel
+
+# Constants
+ARENA: 1
+NEUROTAR: 2
+CAMERA: 3
+OVERHEAD: 4
+
+# Data storage
+# Below is a placeholder line. Replace to right folder in processparams_local.m
+networkpathbase: '\\vs03.herseninstituut.knaw.nl\VS03-CSF-1\Temp'
+
+# Communication between Pi's 
+root_communication_path: '\\VS03\VS03-CSF-1\Communication'
+
+# Debugging and testing
+nt_debug: false
+
+# User interface
+fontsize: 8 # pt
+
+# Automated mouse tracking
+nt_play_gamma: 1 # default gamma to use for showing mouse movies
+nt_make_track_video: false # to store a video with the tracked mouse
+
+# Mouse detection
+nt_min_mouse_length: 120
+nt_max_mouse_area: 5000 # pxl, Max area that could be mouse
+nt_min_component_area: 200 # pxl, Minimal area for component to be relevant
+nt_min_mouse_area: 4000 # pxl, Minimal area a mouse could be
+nt_min_stim_size: 0 # pxl, Minimal area for region that might be stimulus
+nt_max_tail_width: 20 # pxl, Max tail width (to find tailbase)
+nt_min_tail_distance: 70 # pxl, Minimal distance of tailbase to mouse C.o.M.
+nt_dilation: [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]] # for image dilation
+nt_bg_normalization: 20
+nt_black_threshold: 0.25
+nt_min_black_threshold: 0.1
+nt_recompute_background: false # force to recompute background
+nt_constrain_to_arena: false # if true, limits mouse finding to arena
+
+# Automated freezing detection parameters
+wc_difScope: 50 # The range around mouse that is included in pixelchange analysis
+wc_difThreshold: 0.3 # threshold + minimum movement for difference between frames
+# to be considered as no difference, fraction of average movement
+wc_deriv2thres: 0.08 # Threshold for 2nd derivative of vidDif for detecting freezing
+wc_freezeduration_threshold: 0.5 #s minimum duration to call lack of movement a freeze
+wc_freeze_smoother: [5,5] # Number of frames that freeze analysis is averaging over before and after current frame
+
+# For faster graphics
+nt_graphicssmoothing: 'off'
+nt_renderer: 'opengl' # Matlab default is 'opengl'. On some computers 'painters' could be quicker
+nt_drawnow_limitrate: false
+
+# placeholder values that may be overwritten by actual values
+overhead_camera_width: 752
+overhead_camera_height: 550
+
+## Camera sets
+camera_sets:
+    neurotar:
+        nt_camera_names: ['pilefteye','pioverhead','pirighteye']
+        nt_overhead_camera: 2
+        overhead_camera_distortion_method: 'fisheye_orthographic'
+        overhead_camera_distortion: [339, 339]
+        overhead_camera_image_offset: [-4, 4]
+        overhead_camera_rotated: true
+        overhead_camera_angle: -0.13
+    behavior_arena:
+        nt_camera_names: ['side1','overhead','side2'] 
+        nt_overhead_camera: 2
+        overhead_camera_distortion_method: 'normal'
+        overhead_camera_distortion: [1.4, .NaN]
+        overhead_camera_image_offset: [-4, 4]
+        overhead_camera_rotated: true
+        overhead_camera_angle: -0.0436
+        overhead_arena_center: [299, 280]
+    circular_arena:
+        nt_camera_names: ['side1','overhead','side2']
+        nt_overhead_camera: 2
+        overhead_camera_distortion_method: 'fisheye_orthographic'
+        overhead_camera_distortion: [339, 339]
+        overhead_camera_image_offset: [-4, 4]
+        overhead_camera_rotated: true
+        overhead_camera_angle: -0.13
+        overhead_arena_center: [299, 280]
+    elevated_plus_maze:
+        nt_camera_names: ['overhead']
+        nt_overhead_camera: 1
+        overhead_camera_distortion_method: 'normal'
+        overhead_camera_distortion: [1.4, NaN]
+        overhead_camera_image_offset: [-4, 4]
+        overhead_camera_rotated: true
+        overhead_camera_angle: -0.0436
+        overhead_arena_center: [299, 280]
+    default:
+        nt_camera_names: ['pilefteye','pioverhead','pirighteye']
+        nt_overhead_camera: 2
+
+
+## Arenas set by setup
+arenas:
+    neurotar:
+        arena_shape: 'circular'
+        arena_radius_mm: 162.5
+        neurotar_halfwidth_mm: 260
+        overhead_neurotar_headring: [275, 322] # position of center of headring in overhead image
+        overhead_neurotar_center: [256, 238]  # position of center of bar in overhead image, overloaded by values in measures
+        neurotar_snout_distance_mm: 32 # distance from snout to center of neurotar
+    behavior_arena:
+        arena_shape: 'square'
+        arena_diameter_mm: 320
+        arena_radius_mm: 160 # arena_diameter_mm / 2
+    circular_arena:
+        arena_shape: 'circular'
+        arena_radius_mm: 162.5 # NOT CHECKED YET
+    elevated_plus_maze:
+        arena_shape: 'plus'
+        arena_open_arm_length_mm: 297
+        arena_open_arm_width_mm: 50
+        arena_closed_arm_length_mm: 300
+        arena_closed_arm_width_mm: 63
+        arena_radius_mm: 328.5 # arena_open_arm_length_mm + arena_closed_arm_width_mm/2
+        arena_diameter_mm: 657 # arena_radius_mm * 2
+    default:
+        arena_shape: 'square'
+        arena_diameter_mm: 320
+        arena_radius_mm: 160 # arena_diameter_mm / 2
+
+## Time synchronization
+# Time of neurotar acquisition is taken as the master time
+#
+# align times at trigger and then multiply master time with specific
+# multiplier to obtain time in [picamera] values
+
+# video_time(camera): measures.trigger_times{camera}(1)) + picamera_time_multiplier * master_time
+picamera_time_multiplier: 1.0002
+
+# laser_time: laser_trigger_time + laser_time_multiplier * master_time
+laser_time_multiplier: 1.0002
+
+## Marker sets
+
+# when creating new set, try to keep the same markers for the same
+nt_marker_sets:
+    default: # used for object investigation, rwd 
+        # marker_id: [marker, description,               color,     behavior, linked]
+        stop:      ['t', 'Takeout object/sTop stimulus', [1, 0, 0], false, true]
+        start:     ['o', 'place Object/start stimulus',  [0, 0, 1], false, true]
+        idle:      ['i', 'Idle',                         [0, 0, 0], true, false]
+        approach:  ['a', 'Approach',                     [0.03, 0.46, 0.73], true, true]
+        sniff:     ['s', 'Sniff',                        [0.83, 0.34, 0.12], true, true]
+        bite:      ['b', 'Bite',                         [0.94, 0.68, 0.11], true, true]
+        grab:      ['g', 'Grab',                         [0.51, 0.17, 0.57], true, true]
+        carry:     ['c', 'Carry',                        [0.45, 0.69, 0.28], true, true]
+        push:      ['p', 'Push',                         [0.65, 0.39, 0.28], true, true]
+        avoid:     ['v', 'aVoid',                        [0.29, 0.76, 0.92], true, true]
+        groom:     ['r', 'gRoom',                        [0.1, 0.5, 0.8], true, false]
+        climb:     ['l', 'cLimb',                        [0.8, 0.2, 0.9], true, false]
+        dig:       ['d', 'Dig',                          [0.6, 0.3, 0], true, false]
+        bury:      ['y', 'burYing',                      [0.3, 0.6, 0], true, false]
+        overhead:  ['h', 'start overHead stimulus',      [0.4, 0.2, 1], false, true]
+    prey_capture:
+        stop:      ['t', 'stop stimulus',                   [1, 0, 0],    false, true]
+        start:     ['o', 'start physical stimulus',         [0, 0, 1],    false, true]
+        virtual:   ['v', 'start virtual stimulus',          [0, 1, 0],    false, true]
+        ir:        ['i', 'start IR virtual stimulus',       [1, 0.5, 0],  false, true]
+        hanging:   ['h', 'start hanging physical stimulus', [0.4, 0.2, 1], false, true]
+        end:       ['e', 'end session',                     [0, 0, 0],    false, false]
+        opto_on:   ['1', 'optolaser on',                    [0, 0, 1],    false, false]
+        opto_off:  ['0', 'optolaser off',                   [0, 0, 0],    false, false]
+        approach:  ['a', 'begin approach object',           [0, 0.7, 0],  true,  true]
+        retreat:   ['r', 'begin retreat from object',       [0.7, 0, 0],  true,  true]
+    social_behavior:
+        stop:        ['t', 'Takeout intruder',       [1, 0, 0], false, true]
+        start:       ['o', 'place intruder',         [0, 0, 1], false, true]
+        idle:        ['i', 'Idle',                   [0, 0, 0], true,  false]
+        approach:    ['a', 'Approach',               [0.03, 0.46, 0.73], true, true]
+        investigate: ['s', 'inveStigate',            [0.83, 0.34, 0.12], true, true]
+        bite:        ['b', 'Bite',                   [0.94, 0.68, 0.11], true, true]
+        grab:        ['g', 'Grab',                   [0.51, 0.17, 0.57], true, true]
+        carry:       ['c', 'Carry',                  [0.45, 0.69, 0.28], true, true]
+        push:        ['p', 'Push',                   [0.65, 0.39, 0.28], true, true]
+        avoid:       ['v', 'aVoid',                  [0.29, 0.76, 0.92], true, true]
+        groom:       ['r', 'gRoom',                  [0.1, 0.5, 0.8],    true, false]
+        climb:       ['l', 'cLimb',                  [0.8, 0.2, 0.9],    true, false]
+        defense:     ['d', 'Defense',                [0.8, 0.2, 0.9],    true, false]
+        approached:  ['n', 'iNtruder approach',      [0.8, 0.2, 0.9],    true, false]
+        defensed:    ['z', 'intruder defenZe',       [0.8, 0.2, 0.9],    true, false]
+    looming:
+        stop:        ['t', 'sTop stimulus',            [1, 0, 0],    false, true]
+        overhead:    ['h', 'start overHead stimulus',  [0.4, 0.4, 0.8], false, true]
+        start:       ['o', 'start stimulus',           [0.4, 0.2, 1], false, true]
+        idle:        ['i', 'Idle',                     [0, 0, 0],    true,  false]
+        approach:    ['a', 'Approach to the shelter',  [0.03, 0.46, 0.73], true, true]
+        sniff:       ['s', 'Sniff',                    [0.83, 0.34, 0.12], true, true]
+        bite:        ['b', 'Bite',                     [0.94, 0.68, 0.11], true, true]
+        grabb:       ['g', 'Grab',                     [0.51, 0.17, 0.57], true, true]
+        carry:       ['c', 'Carry',                    [0.45, 0.69, 0.28], true, true]
+        push:        ['p', 'Push',                     [0.65, 0.39, 0.28], true, true]
+        avoid:       ['v', 'aVoid to the shelter',     [0.29, 0.76, 0.92], true, true]
+        groom:       ['r', 'gRoom',                    [0.1, 0.5, 0.8],    true, false]
+        climb:       ['l', 'cLimb',                    [0.8, 0.2, 0.9],    true, false]
+        escape:      ['e', 'Escape',                   [0.8, 0.2, 0.9],    true, false]
+        freeze:      ['f', 'Freeze',                   [0.8, 0.2, 0.9],    true, false]
+        rear:        ['u', 'Rear',                     [0.8, 0.2, 0.9],    true, false]
+    elevated_plus_maze:
+        open:        ['o', 'enter open arm',   [0, 0, 1], true, false]
+        closed:      ['c', 'enter closed arm', [1, 0, 0], true, false]
+        middle:      ['m', 'enter middle',     [0, 0, 0], true, false]
+
+nt_stop_marker: 't'
+
+## Analysis
+automatically_track_mouse: false
+nt_replace_speed_by_luminance: false
+nt_recompute_tracking_data: true
+nt_save_snippets: true # save generated peri-event snippets to nt_snippets.mat
+nt_pretime: 10 # s, pre-event time (baseline)
+nt_posttime: 20 # s, post-event time (response period)
+use_clean_baseline: false # if true, then removes all following same events within pretime of event.
+use_ultraclean_baseline: false # if true, then removes all following events within pretime of event.
+
+nt_behaviors:
+  # behavior:   [description,              color   ]         
+  run:          ['running forward',       [0.0, 0.7, 0.0]]
+  turn_towards: ['turn towards object',   [0.0, 0.7, 0.0]]
+  leave_wall:   ['leave wall',            [0.0, 0.7, 0.0]]
+  retreat:      ['retreating',            [0.7, 0.0, 0.0]]
+  turn_away:    ['turn away from object', [0.7, 0.0, 0.0]]
+  touch:        ['touching object',       [0.7, 0.7, 0.0]]
+  approach:     ['approaching object',    [0.0, 0.7, 0.0]]
+  avoid:        ['avoiding object',       [0.7, 0.0, 0.0]]
+
+nt_indices:  
+  # index:                       [description,              color   ]         
+  run_retreat_count_balance:     ['run retreat count bal',  [0, 0, 0]]
+  run_retreat_fraction_balance:  ['run retreat frac bal',   [0, 0, 0]]
+  turn_count_balance:            ['turn count bal',         [0, 0, 0]]
+  turn_fraction_balance:         ['turn fraction bal',      [0, 0, 0]]
+
+nt_rates:
+    # rate:                            [description,            color   ]         
+    forward_speed:                     ['Forward speed',        [0, 0, 0]]
+    distance_to_wall:                  ['Distance to wall',     [0, 0, 0]]
+    angular_velocity_towards_object:   ['Rel. ang. velocity',   [0, 0, 0]]
+    object_distance_derivative:        ['\DeltaObject distance',[0, 0, 0]]
+
+nt_max_touching_distance: 50 # mm
+nt_min_run_speed: 0.09 # m/s
+nt_min_approach_speed: 0.09 # m/s, change in object distance 
+nt_min_retreat_speed: -0.07 # m/s, note the minus sign
+nt_min_angular_velocity: 100 # deg/s
+nt_max_stationarity_speed: 0.015 # m/s
+nt_max_distance_to_wall: 115 # mm,  was 100 before diameter correction
+nt_interaction_period: 10 # s, period to count interactions
+nt_temporal_filter_width: 5 # neurotar samples
+nt_object_sliding_window: 2.0 # s, window to use for peri-stimulus time averaging
+count_once_per_object: true # how often behaviours can be counter per interaction period
+nt_pose_temporal_filter_width: 20 #  samples for median filtering of pose tracking data
+
+# Shuffle analysis
+nt_seed: 1
+nt_shuffle_number: 10 
+nt_shuffle_insert_object_only_when_stationary: true
+nt_shuffle_stationary_period: 2 # s, period for which the animal has to be stationary to insert object
+
+## Photometry
+rwd_slack_time: 0.02 # time window for two events to be simultaneous
+rwd_n_inputs: 5 # number of input channels
+rwd_initial_input_state: [1, 1, .NaN, .NaN, .NaN]
+
+nt_photometry_window_width: 0.1 # s
+nt_photometry_bin_width: 0.1 # s
+nt_photometry_time_offset: 0 # shifts all photometry data 
+nt_photometry_isosbestic_correction: true
+nt_only_use_pretime_for_isosbestic_correction: false
+nt_photometry_median_filter_window: 0.05 # s, use 0 to turn off 
+nt_photometry_low_pass: 5 # Hz, use Inf to turn off
+nt_photometry_high_pass: 0.01 # Hz, use 0 to turn off
+nt_photometry_butterworth_order: 2
+nt_photometry_zscoring: true
+nt_photometry_subtract_baseline: true
+
+nt_color_green:      [0.0, 0.8, 0.0]
+nt_color_gcamp:      [0.0, 0.8, 0.0]
+nt_color_gda3m:      [0.0, 0.8, 0.0]
+nt_color_signal:     [0.0, 0.8, 0.0]
+nt_color_isosbestic: [0.2, 0.2, 1.0]
+
+# Spatial maps
+nt_compute_maps: true
+nt_map_bins: 100 # Approximate number
+
+## Results
+nt_result_shows_individual_object_insertions: true
+
+## Tracking
+nt_show_markers: true # false increases speed at the cost of information loss
+nt_show_position_changes: true # false reduces visual clutter at the cost of information loss
+nt_show_overhead_mouse: true
+nt_show_behavior_markers: true
+nt_track_timeline_max_speed: 0.375 # m/s
+nt_show_help: false
+nt_show_bridge: true
+nt_show_horizon: true
+nt_show_boundaries: true # neurotar frame 
+nt_mouse_trace_window: 3 # s
+nt_show_leave_wall_boundary: true
+nt_forward_speed_in_speed_trace: true
+nt_show_mouse_keypoints: true # true is nice, but slow
+nt_show_distance_trace: false
+nt_show_rotation_trace: false
+nt_show_bridge: false
+nt_show_horizon: false
+nt_show_arena_panel: false
+
+# tracking visuals presets with setup specific overrides 
+tracking_presets:
+    neurotar:
+        nt_show_distance_trace: true
+        nt_show_rotation_trace: true
+        nt_show_bridge: true
+        nt_show_horizon: true
+        nt_show_arena_panel: true

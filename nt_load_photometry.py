@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 
 from logmsg import logmsg
+from nt_change_times import nt_change_times
+from nt_photometry_folder import nt_photometry_folder
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -52,104 +54,6 @@ def parse_channels(comment: str | None) -> dict[str, str]:
             value = value[:-1]
         result[f"Channel{channel_number.strip()}"] = value
     return result
-
-
-def nt_change_times(
-    from_time: Any,
-    triggers_from: Any,
-    triggers_to: Any,
-    multiplier_from: float | None = None,
-    multiplier_to: float | None = None,
-) -> tuple[np.ndarray, float, float]:
-    """Change timestamps from one clock reference to another."""
-    from_time = _as_array(from_time)
-    triggers_from = _as_array(triggers_from)
-    triggers_to = _as_array(triggers_to)
-
-    n_from = triggers_from.size
-    n_to = triggers_to.size
-
-    if n_from == 0 or n_to == 0:
-        raise ValueError("Cannot align times without at least one trigger in each reference.")
-
-    if n_from == 1 and n_to > 1:
-        logmsg("Detected too many triggers TO. Using only the first.")
-        triggers_to = triggers_to[:1]
-        n_to = 1
-    if n_to == 1 and n_from > 1:
-        logmsg("Detected too many triggers FROM. Using only the first.")
-        triggers_from = triggers_from[:1]
-        n_from = 1
-
-    if n_from > n_to:
-        corr_missing_first = np.corrcoef(triggers_from[n_from - n_to :], triggers_to)[0, 1]
-        corr_missing_last = np.corrcoef(triggers_from[:n_to], triggers_to)[0, 1]
-        if corr_missing_first > corr_missing_last:
-            triggers_from = triggers_from[n_from - n_to :]
-            logmsg("Missed first FROM triggers in TO reference")
-        else:
-            triggers_from = triggers_from[:n_to]
-            logmsg("Missed last FROM triggers in TO reference")
-        n_from = triggers_from.size
-
-    if n_from < n_to:
-        corr_missing_first = np.corrcoef(triggers_from, triggers_to[n_to - n_from :])[0, 1]
-        corr_missing_last = np.corrcoef(triggers_from, triggers_to[:n_from])[0, 1]
-        if corr_missing_first > corr_missing_last:
-            triggers_to = triggers_to[n_to - n_from :]
-            logmsg("Missed first TO triggers in FROM reference")
-        else:
-            triggers_to = triggers_to[:n_from]
-            logmsg("Missed last TO triggers in FROM reference")
-        n_to = triggers_to.size
-
-    if n_from == 1:
-        if multiplier_from is None or multiplier_to is None:
-            logmsg("Only single matching trigger and no multipliers given. Assuming both are 1.")
-            multiplier_from = 1
-            multiplier_to = 1
-        triggers_from = np.array([triggers_from[0], triggers_from[0] + 1000 * multiplier_from])
-        triggers_to = np.array([triggers_to[0], triggers_to[0] + 1000 * multiplier_to])
-
-    corr = np.corrcoef(triggers_from, triggers_to)[0, 1]
-    if corr < 0.999:
-        logmsg(f"Only correlation of {corr:.3g} between TO and FROM triggers.")
-
-    x = np.column_stack([np.ones(triggers_from.size), triggers_from])
-    offset, multiplier = np.linalg.lstsq(x, triggers_to, rcond=None)[0]
-
-    if abs(multiplier - 1) > 0.01:
-        logmsg("Clocks are more than 1% different. There is a likely mismatch of triggers.")
-
-    return from_time * multiplier + offset, float(offset), float(multiplier)
-
-
-def nt_photometry_folder(record: Any, params: Any | None = None) -> tuple[Path | None, bool]:
-    """Return the folder containing RWD photometry data, if it can be inferred."""
-    network_path = _get(params, "networkpathbase")
-    project = _get(record, "project")
-    dataset = _get(record, "dataset")
-    subject = _get(record, "subject")
-    sessionid = _get(record, "sessionid")
-
-    if not all([network_path, project, dataset, subject, sessionid]):
-        return None, False
-
-    folder = Path(network_path) / str(project) / "Data_collection" / str(dataset) / str(subject) / str(sessionid)
-    if not folder.exists():
-        date = str(_get(record, "date", "")).replace("-", "_")
-        condition = str(_get(record, "condition", ""))
-        folder = Path(network_path) / str(project) / "Data_collection" / str(dataset) / f"{date}_{subject}_{condition}"
-
-    if not (folder / "Fluorescence-unaligned.csv").exists():
-        dated_folders = sorted(path for path in folder.glob("20*") if path.is_dir()) if folder.exists() else []
-        if not dated_folders:
-            return None, False
-        if len(dated_folders) > 1:
-            logmsg(f"Not sure which folder to pick for photometry data. Picking first folder for {sessionid}.")
-        folder = dated_folders[0]
-
-    return folder, (folder / "Fluorescence-unaligned.csv").exists()
 
 
 def nt_load_rwd_triggers(photometry_folder: str | Path) -> tuple[np.ndarray, pd.DataFrame]:

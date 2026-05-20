@@ -194,7 +194,7 @@ def nt_load_parameters(
     if record is None:
         record = Record()
 
-    yaml_path = Path(yaml_file) if yaml_file is not None else Path.cwd() / "nt_default_parameters.yaml"
+    yaml_path = Path(yaml_file) if yaml_file is not None else Path(__file__).resolve().parent / "nt_default_parameters.yaml"
     if not yaml_path.exists():
         raise FileNotFoundError(f"Cannot find config file: {yaml_path}")
 

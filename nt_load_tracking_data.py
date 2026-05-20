@@ -12,6 +12,7 @@ from scipy.io import loadmat
 
 from load_mat_database import _convert_mat_value
 from logmsg import logmsg
+from nt_session_path import nt_session_path
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -24,19 +25,6 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
 
 def _as_array(value: Any) -> np.ndarray:
     return np.asarray(value, dtype=float).reshape(-1)
-
-
-def nt_session_path(record: Any, params: Any) -> tuple[Path, bool]:
-    """Return the session folder used by NoviTrack."""
-    path = (
-        Path(str(_get(params, "networkpathbase")))
-        / str(_get(record, "project"))
-        / "Data_collection"
-        / str(_get(record, "dataset"))
-        / str(_get(record, "subject"))
-        / str(_get(record, "sessionid"))
-    )
-    return path, path.is_dir()
 
 
 def _median_filter_omitnan(x: np.ndarray, width: int) -> np.ndarray:
