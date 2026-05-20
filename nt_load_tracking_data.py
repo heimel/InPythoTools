@@ -12,6 +12,7 @@ from scipy.io import loadmat
 
 from load_mat_database import _convert_mat_value
 from logmsg import logmsg
+from nt_load_neurotar_data import nt_load_neurotar_data
 from nt_session_path import nt_session_path
 
 
@@ -125,12 +126,7 @@ def nt_load_tracking_data(
     recompute: bool | None = None,
     session_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], np.ndarray]:
-    """Load precomputed ``nt_tracking_data.mat``.
-
-    The raw tracking/recompute branches of the MATLAB function are intentionally
-    not ported yet. This function covers the already-analyzed-session path used
-    by the current analysis port.
-    """
+    """Load tracking data into the NoviTrack format."""
     if recompute is None:
         recompute = bool(_get(params, "nt_recompute_tracking_data", False))
 
@@ -145,15 +141,27 @@ def nt_load_tracking_data(
         return {}, _as_array(_get(_get(record, "measures", {}), "trigger_times", []))
 
     filename = folder / "nt_tracking_data.mat"
+    if filename.exists() and not recompute:
+        mat = loadmat(filename, squeeze_me=True, struct_as_record=False)
+        nt_data = _convert_mat_value(mat["nt_data"])
+        nt_data = _complete_tracking_fields(nt_data, params)
+        trigger_times = _as_array(_get(_get(record, "measures", {}), "trigger_times", []))
+        return nt_data, trigger_times
+
+    nt_data, _ = nt_load_neurotar_data(record, params)
+    if nt_data:
+        logmsg("Not yet reading in all triggers. Assuming one trigger broadcast by Neurotar at time 0.")
+        return nt_data, np.array([0.0])
+
     if recompute:
-        logmsg("Recompute tracking-data branches are not ported yet. Loading precomputed data if present.")
+        logmsg("Non-Neurotar tracking-data recompute branches are not ported yet. Loading precomputed data if present.")
 
-    if not filename.exists():
-        logmsg(f"Precomputed tracking data not found: {filename}")
-        return {}, _as_array(_get(_get(record, "measures", {}), "trigger_times", []))
+    if filename.exists():
+        mat = loadmat(filename, squeeze_me=True, struct_as_record=False)
+        nt_data = _convert_mat_value(mat["nt_data"])
+        nt_data = _complete_tracking_fields(nt_data, params)
+        trigger_times = _as_array(_get(_get(record, "measures", {}), "trigger_times", []))
+        return nt_data, trigger_times
 
-    mat = loadmat(filename, squeeze_me=True, struct_as_record=False)
-    nt_data = _convert_mat_value(mat["nt_data"])
-    nt_data = _complete_tracking_fields(nt_data, params)
-    trigger_times = _as_array(_get(_get(record, "measures", {}), "trigger_times", []))
-    return nt_data, trigger_times
+    logmsg(f"Precomputed tracking data not found: {filename}")
+    return {}, _as_array(_get(_get(record, "measures", {}), "trigger_times", []))
