@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -37,10 +38,12 @@ from PyQt6.QtWidgets import (
 try:
     from .analyse_nttestrecord import analyse_nttestrecord
     from .load_mat_database import load_mat_database, save_mat_database
+    from .nt_load_parameters import nt_load_parameters
     from .results_nttestrecord import results_nttestrecord
 except ImportError:  # pragma: no cover - supports Spyder sessions run from this folder
     from analyse_nttestrecord import analyse_nttestrecord
     from load_mat_database import load_mat_database, save_mat_database
+    from nt_load_parameters import nt_load_parameters
     from results_nttestrecord import results_nttestrecord
 
 
@@ -49,12 +52,14 @@ _OPEN_WINDOWS: list["NTDatabaseBrowser"] = []
 _SIMPLE_COMPARISON_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*(==|!=)\s*([^\s'\"]+)\s*$")
 
 
-def _record_title(record: pd.Series, row_number: int, row_count: int) -> str:
-    parts = [f"Record {row_number} of {row_count}"]
-    for name in ("sessionid", "subject", "dataset", "project"):
-        if name in record.index and not _is_missing(record[name]):
-            parts.append(f"{name}: {record[name]}")
-    return "    ".join(parts)
+def track_behavior_record(record: pd.Series) -> Any:
+    """Launch the behavior tracker lazily so normal database browsing stays light."""
+    try:
+        from .nt_track_behavior import track_record
+    except ImportError:  # pragma: no cover - supports Spyder sessions run from this folder
+        from nt_track_behavior import track_record
+
+    return track_record(record)
 
 
 def _is_missing(value: Any) -> bool:
@@ -116,6 +121,24 @@ def _filter_database(db: pd.DataFrame, expression: str) -> pd.DataFrame:
     return db.loc[mask]
 
 
+def _load_gui_params(yaml_file: str | Path | None = None) -> tuple[int | None, int | None]:
+    try:
+        params = nt_load_parameters(yaml_file=yaml_file)
+    except Exception:
+        return None, None
+
+    font_size = _as_int(params.get("fontsize", None))
+    spacing = _as_int(params.get("nt_database_browser_spacing", None))
+    return font_size, spacing
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class NTDatabaseBrowser(QMainWindow):
     """Browse and act on one row at a time from a NoviTrack DataFrame."""
 
@@ -125,83 +148,129 @@ class NTDatabaseBrowser(QMainWindow):
         *,
         filename: str | Path | None = None,
         actions: Mapping[str, RecordAction] | None = None,
+        font_size: int | None = None,
+        spacing: int | None = None,
+        yaml_file: str | Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("NoviTrack database browser")
 
         self.db = db.copy() if db is not None else pd.DataFrame()
         self.filename = Path(filename) if filename is not None else None
         self.filtered_index: list[Any] = list(self.db.index)
         self.position = 0
         self._updating_table = False
+        self.dirty = False
+        self.save_button: QPushButton | None = None
+
+        yaml_font_size, yaml_spacing = _load_gui_params(yaml_file)
+        self.font_size = font_size if font_size is not None else yaml_font_size
+        self.spacing = spacing if spacing is not None else (yaml_spacing if yaml_spacing is not None else 2)
 
         if actions is None:
             actions = {
                 "Analyze": analyse_nttestrecord,
                 "Results": results_nttestrecord,
+                "Track": track_behavior_record,
             }
         self.actions = dict(actions)
 
         self._build_ui()
         self._refresh_view()
+        self._update_window_state()
 
     def _build_ui(self) -> None:
         root = QWidget(self)
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(self.spacing, self.spacing, self.spacing, self.spacing)
+        layout.setSpacing(self.spacing)
 
-        nav = QHBoxLayout()
-        layout.addLayout(nav)
+        if self.font_size is not None:
+            font = QFont()
+            font.setPointSize(self.font_size)
+            self.setFont(font)
+        control_height = max(22, (self.font_size or 8) + 14)
+        self.setStyleSheet(
+            "QPushButton { padding: 1px 6px; } "
+            "QLineEdit { padding: 1px 4px; } "
+            "QTableWidget::item { padding: 0px 3px; }"
+        )
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(self.spacing)
+        layout.addLayout(top_row)
 
         for label, callback in (
             ("Load", self.load_database),
             ("Save", self.save_database),
             ("Save As", self.save_database_as),
-            ("First", self.first_record),
-            ("Prev", self.previous_record),
-            ("Next", self.next_record),
-            ("Last", self.last_record),
         ):
             button = QPushButton(label)
+            button.setFixedHeight(control_height)
             button.clicked.connect(callback)
-            nav.addWidget(button)
+            top_row.addWidget(button)
+            if label == "Save":
+                self.save_button = button
 
-        nav.addSpacing(12)
-        nav.addWidget(QLabel("Filter"))
-        self.filter_box = QLineEdit()
-        self.filter_box.setPlaceholderText("subject == 102394")
-        self.filter_box.returnPressed.connect(self.apply_filter)
-        nav.addWidget(self.filter_box, stretch=1)
-
-        filter_button = QPushButton("Apply")
-        filter_button.clicked.connect(self.apply_filter)
-        nav.addWidget(filter_button)
-
-        clear_button = QPushButton("Clear")
-        clear_button.clicked.connect(self.clear_filter)
-        nav.addWidget(clear_button)
-
-        action_bar = QHBoxLayout()
-        layout.addLayout(action_bar)
+        top_row.addSpacing(self.spacing)
         for label, callback in self.actions.items():
             button = QPushButton(label)
+            button.setFixedHeight(control_height)
             button.clicked.connect(lambda _checked=False, name=label, func=callback: self.run_action(name, func))
-            action_bar.addWidget(button)
-        action_bar.addStretch(1)
+            top_row.addWidget(button)
+        top_row.addStretch(1)
+
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(self.spacing)
+        layout.addLayout(filter_row)
+        filter_row.addWidget(QLabel("Filter"))
+        self.filter_box = QLineEdit()
+        self.filter_box.setFixedHeight(control_height)
+        self.filter_box.setPlaceholderText("subject == 102394")
+        self.filter_box.returnPressed.connect(self.apply_filter)
+        filter_row.addWidget(self.filter_box, stretch=1)
+
+        filter_button = QPushButton("Apply")
+        filter_button.setFixedHeight(control_height)
+        filter_button.clicked.connect(self.apply_filter)
+        filter_row.addWidget(filter_button)
+
+        clear_button = QPushButton("Clear")
+        clear_button.setFixedHeight(control_height)
+        clear_button.clicked.connect(self.clear_filter)
+        filter_row.addWidget(clear_button)
+
+        nav = QHBoxLayout()
+        nav.setSpacing(self.spacing)
+        layout.addLayout(nav)
+        for label, callback in (
+            ("|<", self.first_record),
+            ("<", self.previous_record),
+            (">", self.next_record),
+            (">|", self.last_record),
+        ):
+            button = QPushButton(label)
+            button.setFixedHeight(control_height)
+            button.clicked.connect(callback)
+            button.setFixedWidth(38)
+            nav.addWidget(button)
+        nav.addStretch(1)
 
         self.status_label = QLabel()
         layout.addWidget(self.status_label)
 
         self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["Field", "Value"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setVisible(False)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(max(18, (self.font_size or 8) + 12))
+        self.table.setShowGrid(False)
         self.table.itemChanged.connect(self._cell_changed)
         layout.addWidget(self.table)
 
-        self.resize(900, 650)
+        self.resize(300, 560)
 
     def current_record_index(self) -> Any | None:
         if not self.filtered_index:
@@ -228,8 +297,10 @@ class NTDatabaseBrowser(QMainWindow):
             self.filename = Path(filename)
             self.filtered_index = list(self.db.index)
             self.position = 0
+            self.dirty = False
             self.filter_box.clear()
             self._refresh_view()
+            self._update_window_state()
         except Exception as exc:  # pragma: no cover - GUI error path
             self._show_error("Load failed", exc)
 
@@ -257,6 +328,8 @@ class NTDatabaseBrowser(QMainWindow):
         try:
             save_mat_database(self.db, filename)
             self.filename = Path(filename)
+            self.dirty = False
+            self._update_window_state()
             self.statusBar().showMessage(f"Saved {filename}", 4000)
         except Exception as exc:  # pragma: no cover - GUI error path
             self._show_error("Save failed", exc)
@@ -314,6 +387,7 @@ class NTDatabaseBrowser(QMainWindow):
         updated_record = _normalize_action_result(result)
         if updated_record is not None:
             self._update_current_row(updated_record)
+            self._set_dirty(True)
             self.statusBar().showMessage(f"{name} updated the current record.", 4000)
         else:
             self.statusBar().showMessage(f"{name} finished.", 4000)
@@ -336,11 +410,13 @@ class NTDatabaseBrowser(QMainWindow):
 
         if self.db.empty:
             self.status_label.setText("No database loaded.")
+            self._update_window_state()
             self._updating_table = False
             return
 
         if not self.filtered_index:
             self.status_label.setText("No records match the current filter.")
+            self._update_window_state()
             self._updating_table = False
             return
 
@@ -350,7 +426,7 @@ class NTDatabaseBrowser(QMainWindow):
             self._updating_table = False
             return
 
-        self.status_label.setText(_record_title(record, self.position + 1, len(self.filtered_index)))
+        self.status_label.setText(f"Record {self.position + 1} of {len(self.filtered_index)}")
         self.table.setRowCount(len(record.index))
         for row, column in enumerate(record.index):
             field_item = QTableWidgetItem(str(column))
@@ -361,6 +437,7 @@ class NTDatabaseBrowser(QMainWindow):
             self.table.setItem(row, 1, value_item)
 
         self._updating_table = False
+        self._update_window_state()
 
     def _cell_changed(self, item: QTableWidgetItem) -> None:
         if self._updating_table or item.column() != 1:
@@ -370,7 +447,35 @@ class NTDatabaseBrowser(QMainWindow):
         if index is None or column is None:
             return
         original = self.db.at[index, column]
-        self.db.at[index, column] = _parse_edited_value(item.text(), original)
+        new_value = _parse_edited_value(item.text(), original)
+        if not self._values_equal(original, new_value):
+            self.db.at[index, column] = new_value
+            self._set_dirty(True)
+
+    def _set_dirty(self, dirty: bool) -> None:
+        self.dirty = dirty
+        self._update_window_state()
+
+    def _update_window_state(self) -> None:
+        filename = self.filename.name if self.filename is not None else "Untitled"
+        marker = "*" if self.dirty else ""
+        self.setWindowTitle(f"NoviTrack database browser - {filename}{marker}")
+        if self.save_button is not None:
+            self.save_button.setEnabled(self.dirty and not self.db.empty)
+
+    @staticmethod
+    def _values_equal(left: Any, right: Any) -> bool:
+        if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+            try:
+                return bool(np.array_equal(left, right, equal_nan=True))
+            except TypeError:
+                return False
+        if _is_missing(left) and _is_missing(right):
+            return True
+        try:
+            return bool(left == right)
+        except (TypeError, ValueError):
+            return False
 
     def _show_error(self, title: str, exc: Exception) -> None:
         details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -382,6 +487,9 @@ def browse_nt_database(
     *,
     filename: str | Path | None = None,
     actions: Mapping[str, RecordAction] | None = None,
+    font_size: int | None = None,
+    spacing: int | None = None,
+    yaml_file: str | Path | None = None,
 ) -> NTDatabaseBrowser:
     """Open a NoviTrack database browser and return the window instance.
 
@@ -397,6 +505,14 @@ def browse_nt_database(
         Mapping from button labels to callables. Each callable receives the
         current record as a pandas Series. If it returns a mapping or Series,
         the current row is updated with those values.
+    font_size:
+        Optional GUI font size in points. Defaults to ``fontsize`` from
+        ``nt_default_parameters.yaml``.
+    spacing:
+        Optional spacing in pixels between browser controls. Defaults to
+        ``nt_database_browser_spacing`` from ``nt_default_parameters.yaml``.
+    yaml_file:
+        Optional parameter YAML file used to read the default GUI settings.
     """
     app = QApplication.instance()
     if app is None:
@@ -405,7 +521,14 @@ def browse_nt_database(
     if db is None and filename is not None:
         db = load_mat_database(filename)
 
-    window = NTDatabaseBrowser(db, filename=filename, actions=actions)
+    window = NTDatabaseBrowser(
+        db,
+        filename=filename,
+        actions=actions,
+        font_size=font_size,
+        spacing=spacing,
+        yaml_file=yaml_file,
+    )
     window.show()
     _OPEN_WINDOWS.append(window)
     return window

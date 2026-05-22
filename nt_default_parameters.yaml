@@ -20,6 +20,7 @@ nt_debug: false
 
 # User interface
 fontsize: 8 # pt
+nt_database_browser_spacing: 2 # px between database browser controls
 
 # Automated mouse tracking
 nt_play_gamma: 1 # default gamma to use for showing mouse movies
