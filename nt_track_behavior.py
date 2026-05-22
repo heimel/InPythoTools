@@ -275,21 +275,22 @@ class NTTrackBehaviorWindow(QMainWindow):
         layout.addLayout(video_row, stretch=5)
         self.video_views: dict[int, pg.PlotWidget] = {}
         self.video_images: dict[int, pg.ImageItem] = {}
+        self.video_info_by_camera: dict[int, VideoInfo] = {}
         self.overhead_mouse_item: pg.PlotDataItem | None = None
         for camera_index in self.active_cameras:
             info = self.video_info[camera_index]
             assert info is not None
             plot = pg.PlotWidget(title=info.camera_name)
             plot.setAspectLocked(True)
+            plot.setMouseEnabled(x=False, y=False)
+            plot.getViewBox().setDefaultPadding(0)
             plot.hideAxis("left")
             plot.hideAxis("bottom")
             image = pg.ImageItem(axisOrder="row-major")
             plot.addItem(image)
-            plot.setLimits(xMin=0, xMax=info.width, yMin=0, yMax=info.height)
-            plot.setXRange(0, info.width, padding=0)
-            plot.setYRange(info.height, 0, padding=0)
             self.video_views[camera_index] = plot
             self.video_images[camera_index] = image
+            self.video_info_by_camera[camera_index] = info
             video_row.addWidget(plot)
 
         overhead_index = int(_get(self.params, "nt_overhead_camera", 1)) - 1
@@ -303,13 +304,21 @@ class NTTrackBehaviorWindow(QMainWindow):
             self.video_views[overhead_index].addItem(self.overhead_mouse_item)
 
         self.timeline = pg.PlotWidget()
+        self.timeline.setBackground("w")
         self.timeline.setMouseEnabled(y=False)
         self.timeline.setYRange(0, float(_get(self.params, "nt_track_timeline_max_speed", 0.375)))
         self.timeline.setXRange(self.min_time, self.max_time, padding=0)
-        self.timeline.plot(self.time_values, np.nan_to_num(np.abs(self.speed_values), nan=0.0), pen=pg.mkPen((160, 160, 160)))
-        self.timeline_cursor = pg.InfiniteLine(self.master_time, angle=90, pen=pg.mkPen("k", width=2), movable=True)
+        self.timeline.plot(self.time_values, np.nan_to_num(np.abs(self.speed_values), nan=0.0), pen=pg.mkPen((140, 140, 140)))
+        self.timeline_cursor = pg.InfiniteLine(
+            self.master_time,
+            angle=90,
+            pen=pg.mkPen((230, 40, 40), width=3),
+            movable=True,
+        )
+        self.timeline_cursor.setZValue(1000)
         self.timeline_cursor.sigPositionChangeFinished.connect(lambda item: self._seek(float(item.value()), force=True))
         self.timeline.addItem(self.timeline_cursor)
+        self.timeline.scene().sigMouseClicked.connect(self._timeline_clicked)
         layout.addWidget(self.timeline, stretch=1)
 
         traces = QHBoxLayout()
@@ -335,13 +344,48 @@ class NTTrackBehaviorWindow(QMainWindow):
         buttons.addStretch(1)
 
         self.resize(1200, 820)
+        QTimer.singleShot(0, self._fit_video_views_to_height)
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._fit_video_views_to_height)
+
+    def _fit_video_views_to_height(self) -> None:
+        """Fit the full movie frame with vertical size as the limiting scale."""
+        for camera_index, plot in self.video_views.items():
+            info = self.video_info_by_camera[camera_index]
+            view_box = plot.getViewBox()
+            rect = view_box.geometry()
+            view_height = max(float(rect.height()), 1.0)
+            view_width = max(float(rect.width()), 1.0)
+            view_aspect = view_width / view_height
+
+            x_center = info.width / 2.0
+            x_span = max(float(info.width), float(info.height) * view_aspect)
+            x0 = x_center - x_span / 2.0
+            x1 = x_center + x_span / 2.0
+            view_box.setRange(xRange=(x0, x1), yRange=(float(info.height), 0.0), padding=0)
+
+    def _timeline_clicked(self, event: Any) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        view_box = self.timeline.getViewBox()
+        if not view_box.sceneBoundingRect().contains(event.scenePos()):
+            return
+        position = view_box.mapSceneToView(event.scenePos())
+        self.playing = False
+        self.state_label.setText("Paused")
+        self._seek(float(position.x()), force=True)
+        event.accept()
 
     def _make_trace_plot(self, title: str, values: np.ndarray, y_range: tuple[float, float]) -> pg.PlotWidget:
         plot = pg.PlotWidget(title=title)
+        plot.setBackground("w")
         plot.plot(self.time_values, values, pen=pg.mkPen("k"))
         plot.setYRange(*y_range)
         plot.setXRange(-3, 3, padding=0)
-        cursor = pg.InfiniteLine(0, angle=90, pen=pg.mkPen((0, 0, 0), width=1))
+        cursor = pg.InfiniteLine(0, angle=90, pen=pg.mkPen((230, 40, 40), width=2))
+        cursor.setZValue(1000)
         plot.addItem(cursor)
         setattr(self, f"_{title.lower()}_cursor", cursor)
         return plot
@@ -365,6 +409,7 @@ class NTTrackBehaviorWindow(QMainWindow):
             color = _qt_color(definition.get("color", [0, 0, 0]) if definition else [0, 0, 0])
             line = pg.InfiniteLine(marker_time, angle=90, pen=pg.mkPen(color, width=1))
             line._nt_marker = True
+            line.setZValue(100)
             self.timeline.addItem(line)
 
     def _tick(self) -> None:
