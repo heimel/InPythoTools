@@ -49,6 +49,7 @@ except ImportError:  # pragma: no cover - supports Spyder sessions run from this
 
 RecordAction = Callable[[pd.Series], Any]
 _OPEN_WINDOWS: list["NTDatabaseBrowser"] = []
+_LAST_WINDOW: "NTDatabaseBrowser | None" = None
 _SIMPLE_COMPARISON_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*(==|!=)\s*([^\s'\"]+)\s*$")
 
 
@@ -514,6 +515,8 @@ def browse_nt_database(
     yaml_file:
         Optional parameter YAML file used to read the default GUI settings.
     """
+    global _LAST_WINDOW
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -530,7 +533,11 @@ def browse_nt_database(
         yaml_file=yaml_file,
     )
     window.show()
+    window.raise_()
+    window.activateWindow()
+    app.processEvents()
     _OPEN_WINDOWS.append(window)
+    _LAST_WINDOW = window
     return window
 
 
@@ -551,4 +558,6 @@ def _main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    exit_code = _main()
+    if exit_code:
+        raise SystemExit(exit_code)

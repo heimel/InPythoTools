@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -240,15 +239,19 @@ class NTTrackBehaviorWindow(QMainWindow):
         toolbar = QToolBar("Tracking", self)
         self.addToolBar(toolbar)
         for text, shortcut, slot in (
-            ("Prev marker", "P", self.previous_marker),
+            ("Prev marker", "Shift+P", self.previous_marker),
             ("Play", "Space", self.toggle_play),
-            ("Next marker", "N", self.next_marker),
+            ("Next marker", "Shift+N", self.next_marker),
             ("Frame -", "Left", self.backward_frame),
             ("Frame +", "Right", self.forward_frame),
             ("-", "-", self.speed_decrease),
             ("1x", "=", self.speed_original),
             ("+", "+", self.speed_increase),
-            ("Help", "H", self.show_help),
+            ("Add marker", "Shift+M", self.add_marker_dialog),
+            ("Delete next", "Del", self.delete_next_marker),
+            ("Go to", "Shift+G", self.goto_dialog),
+            ("Help", "Shift+H", self.show_help),
+            ("Stop", "Shift+Q", self.close),
         ):
             action = QAction(text, self)
             action.setShortcut(shortcut)
@@ -261,6 +264,8 @@ class NTTrackBehaviorWindow(QMainWindow):
         self.time_label = QLabel("0.00")
         self.fps_label = QLabel("")
         self.speed_label = QLabel("1x")
+        self.message_label = QLabel("Ready")
+        self.message_label.setMinimumWidth(320)
         for label, widget in (
             ("State:", self.state_label),
             ("Time:", self.time_label),
@@ -269,6 +274,8 @@ class NTTrackBehaviorWindow(QMainWindow):
         ):
             status.addWidget(QLabel(label))
             status.addWidget(widget)
+        status.addWidget(QLabel("Status:"))
+        status.addWidget(self.message_label, 1)
         status.addStretch(1)
 
         video_row = QHBoxLayout()
@@ -330,19 +337,6 @@ class NTTrackBehaviorWindow(QMainWindow):
         self.distance_plot = self._make_trace_plot("Distance", self.distance_values, (0, 300))
         traces.addWidget(self.distance_plot)
 
-        buttons = QHBoxLayout()
-        layout.addLayout(buttons)
-        for text, slot in (
-            ("Add marker", self.add_marker_dialog),
-            ("Delete next marker", self.delete_next_marker),
-            ("Go to", self.goto_dialog),
-            ("Stop", self.close),
-        ):
-            button = QPushButton(text)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-
         self.resize(1200, 820)
         QTimer.singleShot(0, self._fit_video_views_to_height)
 
@@ -376,7 +370,11 @@ class NTTrackBehaviorWindow(QMainWindow):
         self.playing = False
         self.state_label.setText("Paused")
         self._seek(float(position.x()), force=True)
+        self._report_status(f"Jumped to {self.master_time:.2f} s")
         event.accept()
+
+    def _report_status(self, message: str) -> None:
+        self.message_label.setText(message)
 
     def _make_trace_plot(self, title: str, values: np.ndarray, y_range: tuple[float, float]) -> pg.PlotWidget:
         plot = pg.PlotWidget(title=title)
@@ -464,10 +462,13 @@ class NTTrackBehaviorWindow(QMainWindow):
         if index is None:
             self.overhead_mouse_item.setData([], [])
             return
-        self.overhead_mouse_item.setData(
-            [self.x_values[index], self.com_x_values[index], self.tail_x_values[index]],
-            [self.y_values[index], self.com_y_values[index], self.tail_y_values[index]],
-        )
+        x = np.asarray([self.x_values[index], self.com_x_values[index], self.tail_x_values[index]], dtype=float)
+        y = np.asarray([self.y_values[index], self.com_y_values[index], self.tail_y_values[index]], dtype=float)
+        finite = np.isfinite(x) & np.isfinite(y)
+        if not np.any(finite):
+            self.overhead_mouse_item.setData([], [])
+            return
+        self.overhead_mouse_item.setData(x[finite], y[finite])
 
     def _update_trace_ranges(self) -> None:
         half_window = float(_get(self.params, "nt_mouse_trace_window", 3.0))
@@ -483,16 +484,19 @@ class NTTrackBehaviorWindow(QMainWindow):
         self.playing = not self.playing
         self.state_label.setText("Playing" if self.playing else "Paused")
         self._last_tick = time.perf_counter()
+        self._report_status("Playing" if self.playing else "Paused")
 
     def backward_frame(self) -> None:
         self.playing = False
         self.state_label.setText("Paused")
         self._seek(self.master_time - 1.0 / self._base_fps(), force=True)
+        self._report_status(f"Stepped back to {self.master_time:.2f} s")
 
     def forward_frame(self) -> None:
         self.playing = False
         self.state_label.setText("Paused")
         self._seek(self.master_time + 1.0 / self._base_fps(), force=True)
+        self._report_status(f"Stepped forward to {self.master_time:.2f} s")
 
     def _base_fps(self) -> float:
         info = self.video_info[self.active_cameras[0]]
@@ -504,6 +508,9 @@ class NTTrackBehaviorWindow(QMainWindow):
             self.playing = False
             self.state_label.setText("Paused")
             self._seek(max(marker_times), force=True)
+            self._report_status(f"Jumped to previous marker at {self.master_time:.2f} s")
+        else:
+            self._report_status("No previous marker")
 
     def next_marker(self) -> None:
         marker_times = [float(m["time"]) for m in _markers_as_records(self.measures.get("markers")) if float(m["time"]) > self.master_time + 0.04]
@@ -511,6 +518,9 @@ class NTTrackBehaviorWindow(QMainWindow):
             self.playing = False
             self.state_label.setText("Paused")
             self._seek(min(marker_times), force=True)
+            self._report_status(f"Jumped to next marker at {self.master_time:.2f} s")
+        else:
+            self._report_status("No next marker")
 
     def goto_dialog(self) -> None:
         value, ok = QInputDialog.getDouble(self, "Go to", "Second:", self.master_time, self.min_time, self.max_time, 2)
@@ -518,6 +528,7 @@ class NTTrackBehaviorWindow(QMainWindow):
             self.playing = False
             self.state_label.setText("Paused")
             self._seek(value, force=True)
+            self._report_status(f"Jumped to {self.master_time:.2f} s")
 
     def add_marker_dialog(self) -> None:
         keys = [str(row["marker"]) for _, row in _get(self.params, "markers", pd.DataFrame()).iterrows()]
@@ -528,6 +539,7 @@ class NTTrackBehaviorWindow(QMainWindow):
     def add_marker(self, marker_key: str) -> None:
         definition = _marker_definition(self.params, marker_key)
         if definition is None:
+            self._report_status(f"Unknown marker key {marker_key!r}")
             QMessageBox.warning(self, "Unknown marker", f"Marker {marker_key!r} is not in params.markers.")
             return
         marker_text = marker_key[0]
@@ -536,12 +548,14 @@ class NTTrackBehaviorWindow(QMainWindow):
             if not bool(_get(self.params, "neurotar", False)):
                 stim_id, ok = QInputDialog.getInt(self, "Stimulus", "Stimulus id:", 1, 1, 9)
                 if not ok:
+                    self._report_status("Marker insertion cancelled")
                     return
             marker_text = f"{marker_text}{stim_id}"
 
         markers = _markers_as_records(self.measures.get("markers"))
         if any(abs(float(m.get("time", np.nan)) - self.master_time) < 1e-9 and str(m.get("marker")) == marker_text for m in markers):
             logmsg(f"Marker {marker_text} already present at t = {self.master_time:g}.")
+            self._report_status(f"Marker {marker_text} already present at {self.master_time:.2f} s")
             return
         markers.append({"time": float(self.master_time), "marker": marker_text})
         self.measures["markers"] = sorted(markers, key=lambda item: float(item["time"]))
@@ -553,35 +567,42 @@ class NTTrackBehaviorWindow(QMainWindow):
         self.changed = True
         self._refresh_marker_items()
         _set_record_field(self.record, "measures", self.measures)
+        self._report_status(f"Added marker {marker_text} at {self.master_time:.2f} s")
 
     def delete_next_marker(self) -> None:
         markers = _markers_as_records(self.measures.get("markers"))
         later = [(i, marker) for i, marker in enumerate(markers) if float(marker.get("time", np.nan)) > self.master_time]
         if not later:
+            self._report_status("No next marker to delete")
             return
         index, marker = later[0]
         answer = QMessageBox.question(self, "Delete marker", f"Delete marker {marker.get('marker')} at {float(marker.get('time')):.2f} s?")
         if answer != QMessageBox.StandardButton.Yes:
+            self._report_status("Marker deletion cancelled")
             return
         del markers[index]
         self.measures["markers"] = markers
         self.changed = True
         self._refresh_marker_items()
         _set_record_field(self.record, "measures", self.measures)
+        self._report_status(f"Deleted marker {marker.get('marker')} at {float(marker.get('time')):.2f} s")
 
     def speed_increase(self) -> None:
         index = min(_SPEEDS.index(self.playback_speed) + 1, len(_SPEEDS) - 1)
         self.playback_speed = _SPEEDS[index]
         self.speed_label.setText(f"{self.playback_speed:g}x")
+        self._report_status(f"Playback speed {self.playback_speed:g}x")
 
     def speed_decrease(self) -> None:
         index = max(_SPEEDS.index(self.playback_speed) - 1, 0)
         self.playback_speed = _SPEEDS[index]
         self.speed_label.setText(f"{self.playback_speed:g}x")
+        self._report_status(f"Playback speed {self.playback_speed:g}x")
 
     def speed_original(self) -> None:
         self.playback_speed = 1.0
         self.speed_label.setText("1x")
+        self._report_status("Playback speed 1x")
 
     def show_help(self) -> None:
         marker_lines = []
@@ -595,10 +616,13 @@ class NTTrackBehaviorWindow(QMainWindow):
                 [
                     "Space: play/pause",
                     "Left/Right: frame step",
-                    "P/N: previous/next marker",
+                    "Shift+P/Shift+N: previous/next marker",
                     "+/-: playback speed",
-                    "M: add marker",
+                    "Shift+M: add marker",
+                    "Shift+G: go to time",
                     "Delete: delete next marker",
+                    "Shift+H: show help",
+                    "Shift+Q/Esc: stop tracking",
                     "",
                     *marker_lines,
                 ]
@@ -608,13 +632,15 @@ class NTTrackBehaviorWindow(QMainWindow):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         modifiers = event.modifiers()
-        if key == Qt.Key.Key_M and modifiers == Qt.KeyboardModifier.NoModifier:
+        if key == Qt.Key.Key_M and modifiers == Qt.KeyboardModifier.ShiftModifier:
             self.add_marker_dialog()
         elif key == Qt.Key.Key_Delete:
             self.delete_next_marker()
-        elif key == Qt.Key.Key_G:
+        elif key == Qt.Key.Key_G and modifiers == Qt.KeyboardModifier.ShiftModifier:
             self.goto_dialog()
-        elif key == Qt.Key.Key_Q or key == Qt.Key.Key_Escape:
+        elif key == Qt.Key.Key_Q and modifiers == Qt.KeyboardModifier.ShiftModifier:
+            self.close()
+        elif key == Qt.Key.Key_Escape:
             self.close()
         elif key == Qt.Key.Key_Left and modifiers == Qt.KeyboardModifier.AltModifier:
             self._seek(self.master_time - 5.0, force=True)
@@ -625,9 +651,16 @@ class NTTrackBehaviorWindow(QMainWindow):
             if _marker_definition(self.params, marker_key) is not None:
                 self.add_marker(marker_key)
             else:
+                self._report_unmapped_key(event)
                 super().keyPressEvent(event)
         else:
+            self._report_unmapped_key(event)
             super().keyPressEvent(event)
+
+    def _report_unmapped_key(self, event: QKeyEvent) -> None:
+        text = event.text()
+        key_name = text if text else f"key code {int(event.key())}"
+        self._report_status(f"Unmapped key: {key_name}")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._closed = True
