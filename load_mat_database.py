@@ -156,7 +156,7 @@ def _repair_known_matlab_tables(records: list[dict[str, Any]]) -> list[dict[str,
 
 def load_mat_database(filename: str | Path) -> pd.DataFrame:
     """Load a MATLAB test database named ``db`` and convert it to a DataFrame."""
-    print("Loading " + filename)
+    print(f"Loading {filename}")
     db = loadmat_as_dataframe(filename, variable_name="db")
     return db
 
