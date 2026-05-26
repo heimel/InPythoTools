@@ -51,6 +51,12 @@ RecordAction = Callable[[pd.Series], Any]
 _OPEN_WINDOWS: list["NTDatabaseBrowser"] = []
 _LAST_WINDOW: "NTDatabaseBrowser | None" = None
 _SIMPLE_COMPARISON_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*(==|!=)\s*([^\s'\"]+)\s*$")
+_DEFAULT_TEST_DATABASE = Path(__file__).parent / "test_data" / "nttestdb_examples.mat"
+
+
+def _default_database_filename() -> Path:
+    """Return the bundled example database used when no filename is supplied."""
+    return _DEFAULT_TEST_DATABASE
 
 
 def track_behavior_record(record: pd.Series) -> Any:
@@ -61,6 +67,14 @@ def track_behavior_record(record: pd.Series) -> Any:
         from nt_track_behavior import track_record
 
     return track_record(record)
+
+
+def analyse_nttestrecord_and_show_results(record: pd.Series) -> Any:
+    """Analyze a record from the GUI and then display its result figures."""
+    result = analyse_nttestrecord(record)
+    updated_record = _normalize_action_result(result)
+    results_nttestrecord(updated_record if updated_record is not None else record)
+    return result
 
 
 def _is_missing(value: Any) -> bool:
@@ -140,6 +154,10 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def _last_record_position(index: list[Any]) -> int:
+    return max(0, len(index) - 1)
+
+
 class NTDatabaseBrowser(QMainWindow):
     """Browse and act on one row at a time from a NoviTrack DataFrame."""
 
@@ -159,7 +177,7 @@ class NTDatabaseBrowser(QMainWindow):
         self.db = db.copy() if db is not None else pd.DataFrame()
         self.filename = Path(filename) if filename is not None else None
         self.filtered_index: list[Any] = list(self.db.index)
-        self.position = 0
+        self.position = _last_record_position(self.filtered_index)
         self._updating_table = False
         self.dirty = False
         self.save_button: QPushButton | None = None
@@ -170,7 +188,7 @@ class NTDatabaseBrowser(QMainWindow):
 
         if actions is None:
             actions = {
-                "Analyze": analyse_nttestrecord,
+                "Analyze": analyse_nttestrecord_and_show_results,
                 "Results": results_nttestrecord,
                 "Track": track_behavior_record,
             }
@@ -297,7 +315,7 @@ class NTDatabaseBrowser(QMainWindow):
             self.db = load_mat_database(filename)
             self.filename = Path(filename)
             self.filtered_index = list(self.db.index)
-            self.position = 0
+            self.position = _last_record_position(self.filtered_index)
             self.dirty = False
             self.filter_box.clear()
             self._refresh_view()
@@ -497,8 +515,9 @@ def browse_nt_database(
     Parameters
     ----------
     db:
-        Database DataFrame. If omitted and ``filename`` is given, the file is
-        loaded with :func:`load_mat_database`.
+        Database DataFrame. If omitted, ``filename`` is loaded with
+        :func:`load_mat_database`. If both ``db`` and ``filename`` are omitted,
+        the bundled ``test_data/nttestdb_examples.mat`` database is loaded.
     filename:
         Optional ``.mat`` database path. Used for initial loading and as the
         default save location.
@@ -520,6 +539,9 @@ def browse_nt_database(
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
+
+    if db is None and filename is None:
+        filename = _default_database_filename()
 
     if db is None and filename is not None:
         db = load_mat_database(filename)
