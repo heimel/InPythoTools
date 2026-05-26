@@ -61,6 +61,14 @@ def _safe_div(num: float, den: float) -> float:
     return float(num / den) if den != 0 else np.nan
 
 
+def _event_field(event_type: str) -> str:
+    if event_type == "0":
+        return "opto_off"
+    if event_type == "1":
+        return "opto_on"
+    return event_type
+
+
 def nt_compute_event_measures(
     snippets: Mapping[str, Any] | None,
     measures: Mapping[str, Any],
@@ -80,7 +88,7 @@ def nt_compute_event_measures(
     unique_events = pd.unique(events["event"])
 
     out.setdefault("behavior", {})
-    stim_markers = set(str(marker) for marker in _get(params, "nt_stim_markers", []))
+    motif_set = set(motif_list)
     stop_marker = str(_get(params, "nt_stop_marker", "t"))
     has_movie_bounds = "max_time" in out and "min_time" in out
     max_time = float(_get(out, "max_time", np.nan))
@@ -88,12 +96,13 @@ def nt_compute_event_measures(
 
     for event_type in unique_events:
         event_type = str(event_type)
-        if not event_type or event_type[0] not in stim_markers:
+        if event_type and event_type[0] in motif_set:
             continue
 
         stim_indices = events.index[events["event"] == event_type].to_numpy()
         n_stimuli = len(stim_indices)
-        out["behavior"].setdefault(event_type, {})
+        field_event_type = _event_field(event_type)
+        out["behavior"].setdefault(field_event_type, {})
 
         for motif in motif_list:
             shortest_latency = np.inf
@@ -143,7 +152,7 @@ def nt_compute_event_measures(
                         )
                     total_duration += duration
 
-            out["behavior"][event_type][motif] = {
+            out["behavior"][field_event_type][motif] = {
                 "n_occurrences_per_stimulus": _safe_div(n_occurrences, n_stimuli),
                 "n_responses_per_stimulus": _safe_div(n_responses, n_stimuli),
                 "shortest_latency": shortest_latency,
@@ -205,12 +214,13 @@ def nt_compute_event_measures(
     for event_type in unique_events:
         event_type = str(event_type)
         event_indices = events.index[events["event"] == event_type].to_numpy()
-        out["event"].setdefault(event_type, {})
+        field_event_type = _event_field(event_type)
+        out["event"].setdefault(field_event_type, {})
         for field, values in data.items():
             arr = np.asarray(values, dtype=float)
             event_data = arr[event_indices, :]
             snippet_mean = np.nanmean(event_data, axis=0)
-            out["event"][event_type][field] = {
+            out["event"][field_event_type][field] = {
                 "snippet_mean": snippet_mean,
                 "snippet_first": event_data[0, :],
                 "snippet_std": np.nanstd(event_data, axis=0, ddof=0),

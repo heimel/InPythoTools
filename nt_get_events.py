@@ -32,6 +32,7 @@ def nt_get_events(measures: Any, params: Any | None = None) -> pd.DataFrame:
             "event": [str(_get(marker, "marker")) for marker in markers],
         }
     )
+    events["event"] = events["event"].replace({"0": "opto_off", "1": "opto_on"})
 
     pretime = float(_get(params, "nt_pretime", 10))
 

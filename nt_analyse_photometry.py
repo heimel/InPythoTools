@@ -60,6 +60,9 @@ def compute_maps(
     range_x = np.array([np.nanmin(com_x[ind]), np.nanmax(com_x[ind])])
     range_y = np.array([np.nanmin(com_y[ind]), np.nanmax(com_y[ind])])
     resolution = min(np.diff(range_x)[0] / n_x, np.diff(range_y)[0] / n_y)
+    if np.isnan(np.diff(range_x)[0]) or np.isnan(np.diff(range_y)[0]) or resolution <= 0:
+        return measures
+
     n_x = int(np.ceil(np.diff(range_x)[0] / resolution))
     n_y = int(np.ceil(np.diff(range_y)[0] / resolution))
 

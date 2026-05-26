@@ -206,6 +206,8 @@ nt_marker_sets:
         escape:      ['e', 'Escape',                   [0.8, 0.2, 0.9],    true, false]
         freeze:      ['f', 'Freeze',                   [0.8, 0.2, 0.9],    true, false]
         rear:        ['u', 'Rear',                     [0.8, 0.2, 0.9],    true, false]
+        opto_on:     ['1', 'optolaser on',             [0.0, 0.0, 1.0],   false, false]
+        opto_off:    ['0', 'optolaser off',            [0.0, 0.0, 0],     false, false]
     elevated_plus_maze:
         open:        ['o', 'enter open arm',   [0, 0, 1], true, false]
         closed:      ['c', 'enter closed arm', [1, 0, 0], true, false]
