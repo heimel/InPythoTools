@@ -8,7 +8,9 @@ It is intentionally lightweight so it can be started comfortably from Spyder.
 from __future__ import annotations
 
 import ast
+import os
 import re
+import subprocess
 import sys
 import traceback
 from collections.abc import Callable, Mapping
@@ -39,11 +41,13 @@ try:
     from .analyse_nttestrecord import analyse_nttestrecord
     from .load_mat_database import load_mat_database, save_mat_database
     from .nt_load_parameters import nt_load_parameters
+    from .nt_session_path import nt_session_path
     from .results_nttestrecord import results_nttestrecord
 except ImportError:  # pragma: no cover - supports Spyder sessions run from this folder
     from analyse_nttestrecord import analyse_nttestrecord
     from load_mat_database import load_mat_database, save_mat_database
     from nt_load_parameters import nt_load_parameters
+    from nt_session_path import nt_session_path
     from results_nttestrecord import results_nttestrecord
 
 
@@ -51,6 +55,8 @@ RecordAction = Callable[[pd.Series], Any]
 _OPEN_WINDOWS: list["NTDatabaseBrowser"] = []
 _LAST_WINDOW: "NTDatabaseBrowser | None" = None
 _SIMPLE_COMPARISON_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*(==|!=)\s*([^\s'\"]+)\s*$")
+_TRAILING_INT_RE = re.compile(r"^(.*?)(\d+)(\D*)$")
+_PERSISTENT_TAG = "persistent"
 _DEFAULT_TEST_DATABASE = Path(__file__).parent / "test_data" / "nttestdb_examples.mat"
 
 
@@ -158,6 +164,54 @@ def _last_record_position(index: list[Any]) -> int:
     return max(0, len(index) - 1)
 
 
+def _next_record_index(index: pd.Index) -> Any:
+    numeric_values = [value for value in index if isinstance(value, (int, np.integer))]
+    if numeric_values:
+        return max(numeric_values) + 1
+
+    next_index = len(index)
+    while next_index in index:
+        next_index += 1
+    return next_index
+
+
+def _increment_record_value(value: Any) -> Any:
+    if isinstance(value, (int, np.integer)):
+        return int(value) + 1
+    if isinstance(value, (float, np.floating)) and np.isfinite(value) and float(value).is_integer():
+        return int(value) + 1
+    if isinstance(value, str):
+        match = _TRAILING_INT_RE.match(value)
+        if match is None:
+            return value
+        prefix, digits, suffix = match.groups()
+        incremented = str(int(digits) + 1).zfill(len(digits))
+        return f"{prefix}{incremented}{suffix}"
+    return value
+
+
+def _has_persistent_tag(obj: Any) -> bool:
+    if getattr(obj, "tag", None) == _PERSISTENT_TAG:
+        return True
+    try:
+        return obj.property("tag") == _PERSISTENT_TAG
+    except AttributeError:
+        return False
+
+
+def _filename_with_selected_extension(filename: str | Path, selected_filter: str) -> Path:
+    path = Path(filename)
+    if path.suffix:
+        return path
+    if "Python pickle" in selected_filter:
+        return path.with_suffix(".pkl")
+    if "Excel workbook" in selected_filter:
+        return path.with_suffix(".xlsx")
+    if "CSV file" in selected_filter:
+        return path.with_suffix(".csv")
+    return path.with_suffix(".mat")
+
+
 class NTDatabaseBrowser(QMainWindow):
     """Browse and act on one row at a time from a NoviTrack DataFrame."""
 
@@ -173,6 +227,8 @@ class NTDatabaseBrowser(QMainWindow):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.tag = _PERSISTENT_TAG
+        self.setProperty("tag", _PERSISTENT_TAG)
 
         self.db = db.copy() if db is not None else pd.DataFrame()
         self.filename = Path(filename) if filename is not None else None
@@ -223,7 +279,9 @@ class NTDatabaseBrowser(QMainWindow):
         for label, callback in (
             ("Load", self.load_database),
             ("Save", self.save_database),
-            ("Save As", self.save_database_as),
+            ("Export", self.export_database),
+            ("Close figs", self.close_nonpersistent_figures),
+            ("Explore", self.explore_session_folder),
         ):
             button = QPushButton(label)
             button.setFixedHeight(control_height)
@@ -268,6 +326,8 @@ class NTDatabaseBrowser(QMainWindow):
             ("<", self.previous_record),
             (">", self.next_record),
             (">|", self.last_record),
+            ("-", self.delete_current_record),
+            ("+", self.duplicate_current_record),
         ):
             button = QPushButton(label)
             button.setFixedHeight(control_height)
@@ -325,33 +385,200 @@ class NTDatabaseBrowser(QMainWindow):
 
     def save_database(self) -> None:
         if self.filename is None:
-            self.save_database_as()
+            self.export_database()
             return
         self._save_to_file(self.filename)
 
-    def save_database_as(self) -> None:
+    def export_database(self) -> None:
         if self.db.empty:
             QMessageBox.information(self, "Nothing to save", "The database is empty.")
             return
-        filename, _ = QFileDialog.getSaveFileName(
+        export_db = self.db
+        export_selection = False
+        if self._has_active_filter():
+            choice = self._ask_export_scope()
+            if choice is None:
+                return
+            export_selection = choice == "selection"
+            if export_selection:
+                export_db = self.db.loc[self.filtered_index]
+
+        filename, selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Save MATLAB database",
+            "Export database",
             str(self.filename if self.filename else Path.cwd() / "db.mat"),
-            "MATLAB files (*.mat);;All files (*.*)",
+            "MATLAB database (*.mat);;Python pickle (*.pkl *.pickle);;Excel workbook (*.xlsx);;CSV file (*.csv);;All files (*.*)",
         )
         if not filename:
             return
-        self._save_to_file(Path(filename))
+        self._save_to_file(
+            _filename_with_selected_extension(filename, selected_filter),
+            db=export_db,
+            update_filename=not export_selection,
+        )
 
-    def _save_to_file(self, filename: str | Path) -> None:
+    def save_database_as(self) -> None:
+        self.export_database()
+
+    def _save_to_file(
+        self,
+        filename: str | Path,
+        *,
+        db: pd.DataFrame | None = None,
+        update_filename: bool = True,
+    ) -> None:
         try:
-            save_mat_database(self.db, filename)
-            self.filename = Path(filename)
-            self.dirty = False
-            self._update_window_state()
+            export_db = self.db if db is None else db
+            filename = Path(filename)
+            suffix = filename.suffix.lower()
+            if suffix == ".mat":
+                save_mat_database(export_db, filename)
+            elif suffix in {".pkl", ".pickle"}:
+                export_db.to_pickle(filename)
+            elif suffix in {".xlsx", ".xls"}:
+                export_db.to_excel(filename, index=False)
+            elif suffix == ".csv":
+                export_db.to_csv(filename, index=False)
+            else:
+                raise ValueError(
+                    f"Unsupported export extension {suffix!r}. Use .mat, .pkl, .xlsx, or .csv."
+                )
+            if update_filename:
+                self.filename = Path(filename)
+                self.dirty = False
+                self._update_window_state()
             self.statusBar().showMessage(f"Saved {filename}", 4000)
         except Exception as exc:  # pragma: no cover - GUI error path
             self._show_error("Save failed", exc)
+
+    def delete_current_record(self) -> None:
+        index = self.current_record_index()
+        if index is None:
+            QMessageBox.information(self, "No record", "There is no current record to delete.")
+            return
+        indexes_to_delete = self._confirm_delete_indexes(index)
+        if not indexes_to_delete:
+            return
+
+        self.db = self.db.drop(index=indexes_to_delete)
+        self.filtered_index = [value for value in self.filtered_index if value not in indexes_to_delete]
+        if not self.filtered_index:
+            self.filtered_index = list(self.db.index)
+        self.position = max(0, min(self.position, len(self.filtered_index) - 1))
+        self._set_dirty(True)
+        self._refresh_view()
+
+    def duplicate_current_record(self) -> None:
+        record = self.current_record()
+        if record is None:
+            QMessageBox.information(self, "No record", "There is no current record to duplicate.")
+            return
+
+        new_record = record.copy()
+        for column in ("sessionid", "sessnr"):
+            if column in new_record.index:
+                new_record[column] = _increment_record_value(new_record[column])
+        if "measures" in new_record.index:
+            new_record["measures"] = {}
+        if "comment" in new_record.index:
+            new_record["comment"] = ""
+
+        new_index = _next_record_index(self.db.index)
+        new_row = pd.DataFrame([new_record.to_dict()], index=[new_index])
+        current_index = self.current_record_index()
+        insert_at = self.db.index.get_loc(current_index) + 1
+        before = self.db.iloc[:insert_at]
+        after = self.db.iloc[insert_at:]
+        self.db = pd.concat([before, new_row, after], sort=False)
+        self.filtered_index = list(self.db.index)
+        self.position = self.filtered_index.index(new_index)
+        self.filter_box.clear()
+        self._set_dirty(True)
+        self._refresh_view()
+
+    def close_nonpersistent_figures(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError as exc:  # pragma: no cover - matplotlib is a runtime dependency
+            self._show_error("Close figures failed", exc)
+            return
+
+        closed = 0
+        for number in plt.get_fignums():
+            figure = plt.figure(number)
+            if _has_persistent_tag(figure):
+                continue
+            plt.close(figure)
+            closed += 1
+        self.statusBar().showMessage(f"Closed {closed} figure(s).", 4000)
+
+    def explore_session_folder(self) -> None:
+        record = self.current_record()
+        if record is None:
+            QMessageBox.information(self, "No record", "There is no current record to explore.")
+            return
+        try:
+            folder, exists = nt_session_path(record)
+        except Exception as exc:  # pragma: no cover - GUI error path
+            self._show_error("Explore failed", exc)
+            return
+        if not exists:
+            QMessageBox.information(self, "Folder not found", f"{folder} does not exist.")
+            return
+        if os.name == "nt":
+            subprocess.Popen(["explorer", str(folder)])
+            self.statusBar().showMessage(f"Opened {folder}", 4000)
+        else:
+            QMessageBox.information(self, "Explore unavailable", f"Folder path:\n{folder}")
+
+    def _has_active_filter(self) -> bool:
+        return len(self.filtered_index) != len(self.db.index) or bool(self.filter_box.text().strip())
+
+    def _confirm_delete_indexes(self, current_index: Any) -> list[Any]:
+        if self._has_active_filter() and len(self.filtered_index) > 1:
+            message = QMessageBox(self)
+            message.setIcon(QMessageBox.Icon.Warning)
+            message.setWindowTitle("Delete records")
+            message.setText(
+                f"Delete the current record or all {len(self.filtered_index)} records in the current selection?"
+            )
+            current_button = message.addButton("Current record", QMessageBox.ButtonRole.AcceptRole)
+            selection_button = message.addButton("Current selection", QMessageBox.ButtonRole.DestructiveRole)
+            message.addButton(QMessageBox.StandardButton.Cancel)
+            message.exec()
+            clicked = message.clickedButton()
+            if clicked == current_button:
+                return [current_index]
+            if clicked == selection_button:
+                return list(self.filtered_index)
+            return []
+
+        answer = QMessageBox.question(
+            self,
+            "Delete record",
+            "Delete the current record?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return [current_index] if answer == QMessageBox.StandardButton.Yes else []
+
+    def _ask_export_scope(self) -> str | None:
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Question)
+        message.setWindowTitle("Export database")
+        message.setText(
+            f"Export all {len(self.db)} records or only the {len(self.filtered_index)} records in the current selection?"
+        )
+        all_button = message.addButton("All records", QMessageBox.ButtonRole.AcceptRole)
+        selection_button = message.addButton("Current selection", QMessageBox.ButtonRole.AcceptRole)
+        message.addButton(QMessageBox.StandardButton.Cancel)
+        message.exec()
+        clicked = message.clickedButton()
+        if clicked == all_button:
+            return "all"
+        if clicked == selection_button:
+            return "selection"
+        return None
 
     def apply_filter(self) -> None:
         expression = self.filter_box.text().strip()
