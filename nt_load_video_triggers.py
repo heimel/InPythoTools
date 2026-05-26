@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,37 @@ def _movie_stem(record: Any, session_path: Path, camera_name: str) -> Path:
     return candidates[-1]
 
 
+def _parse_float(text: str) -> float | None:
+    try:
+        return float(text.strip())
+    except ValueError:
+        return None
+
+
+def _read_trigger_csv(filename: str | Path) -> np.ndarray:
+    rows: list[tuple[bool, float]] = []
+    with Path(filename).open(newline="") as csvfile:
+        for row in csv.reader(csvfile):
+            values = [item.strip() for item in row if item.strip()]
+            if not values:
+                continue
+
+            if len(values) == 1:
+                value = _parse_float(values[0])
+                if value is not None:
+                    rows.append((False, value))
+                continue
+
+            time_seconds = _parse_float(values[-1])
+            if time_seconds is None:
+                continue
+            rows.append((True, time_seconds))
+
+    if any(is_multicolumn for is_multicolumn, _value in rows):
+        return np.asarray([[np.nan, np.nan, value] for _is_multicolumn, value in rows], dtype=float)
+    return np.asarray([[value] for _is_multicolumn, value in rows], dtype=float)
+
+
 def nt_load_video_triggers(
     record: Any,
     camera_name: str,
@@ -72,7 +104,7 @@ def nt_load_video_triggers(
         events = pd.DataFrame({"time": triggers, "code": ["trigger1"], "duration": [0.001]})
         return triggers, events
 
-    data = pd.read_csv(trigger_filename).to_numpy(dtype=float)
+    data = _read_trigger_csv(trigger_filename)
     if data.ndim == 1:
         data = data.reshape(-1, 1)
 
