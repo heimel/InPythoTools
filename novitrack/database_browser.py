@@ -15,11 +15,11 @@ from inpythotools.database_browser import (
     browse_database,
 )
 
-from analyse_nttestrecord import analyse_nttestrecord
-from load_mat_database import load_mat_database
-from nt_load_parameters import nt_load_parameters
-from nt_session_path import nt_session_path
-from results_nttestrecord import results_nttestrecord
+from .analyse_nttestrecord import analyse_nttestrecord
+from inpythotools.mat_database import load_mat_database
+from .nt_load_parameters import nt_load_parameters
+from .nt_session_path import nt_session_path
+from .results_nttestrecord import results_nttestrecord
 
 
 _OPEN_WINDOWS: list[DatabaseBrowser] = []
@@ -34,7 +34,7 @@ def default_database_filename() -> Path:
 
 def track_behavior_record(record: pd.Series) -> Any:
     """Launch the behavior tracker lazily so normal database browsing stays light."""
-    from nt_track_behavior import track_record
+    from .nt_track_behavior import track_record
 
     return track_record(record)
 

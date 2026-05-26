@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from load_mat_database import load_mat_database, save_mat_database
+from .mat_database import load_mat_database, save_mat_database
 
 
 RecordAction = Callable[[pd.Series], Any]
