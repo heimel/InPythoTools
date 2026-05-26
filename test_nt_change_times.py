@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from nt_change_times import (
+from novitrack.nt_change_times import (
     nt_change_neurotar_to_video_times,
     nt_change_times,
     nt_change_video_to_neurotar_times,

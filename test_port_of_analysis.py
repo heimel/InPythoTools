@@ -1,6 +1,5 @@
-from load_mat_database import load_mat_database
-from analyse_nttestrecord import analyse_nttestrecord
-from results_nttestrecord import results_nttestrecord
+from inpythotools import load_mat_database
+from novitrack import analyse_nttestrecord, results_nttestrecord
 
 def test_analysis():
     testpath = r"C:/Users/alexa/OneDrive/GitHub\Heimel/InPythoTools/test_data/"

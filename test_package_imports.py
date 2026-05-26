@@ -13,9 +13,3 @@ def test_inpythotools_exports_generic_browser() -> None:
     from inpythotools import browse_database
 
     assert browse_database.__name__ == "browse_database"
-
-
-def test_legacy_database_browser_import_still_works() -> None:
-    from nt_database_browser import browse_nt_database
-
-    assert browse_nt_database.__name__ == "browse_nt_database"

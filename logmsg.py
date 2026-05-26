@@ -1,1 +1,0 @@
-from inpythotools.logmsg import *

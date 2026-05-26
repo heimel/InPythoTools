@@ -17,16 +17,10 @@ except ImportError as exc:  # pragma: no cover - dependency checked at runtime
 else:
     _CV2_IMPORT_ERROR = None
 
-try:
-    from .logmsg import logmsg
-    from .nt_load_parameters import nt_load_parameters
-    from .nt_load_video_triggers import nt_load_video_triggers
-    from .nt_session_path import nt_session_path
-except ImportError:  # pragma: no cover - supports Spyder sessions run from this folder
-    from inpythotools.logmsg import logmsg
-    from .nt_load_parameters import nt_load_parameters
-    from .nt_load_video_triggers import nt_load_video_triggers
-    from .nt_session_path import nt_session_path
+from inpythotools.logmsg import logmsg
+from .nt_load_parameters import nt_load_parameters
+from .nt_load_video_triggers import nt_load_video_triggers
+from .nt_session_path import nt_session_path
 
 
 VIDEO_EXTENSIONS = (".mp4", ".MP4", ".h264", ".avi", ".AVI", ".mov", ".MOV")

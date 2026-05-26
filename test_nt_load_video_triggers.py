@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from nt_load_video_triggers import nt_load_video_triggers
+from novitrack.nt_load_video_triggers import nt_load_video_triggers
 
 
 def test_loads_malformed_three_column_trigger_csv(tmp_path) -> None:

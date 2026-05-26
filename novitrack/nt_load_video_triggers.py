@@ -10,14 +10,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-try:
-    from .logmsg import logmsg
-    from .nt_load_parameters import nt_load_parameters
-    from .nt_session_path import nt_session_path
-except ImportError:  # pragma: no cover - supports Spyder sessions run from this folder
-    from inpythotools.logmsg import logmsg
-    from .nt_load_parameters import nt_load_parameters
-    from .nt_session_path import nt_session_path
+from inpythotools.logmsg import logmsg
+from .nt_load_parameters import nt_load_parameters
+from .nt_session_path import nt_session_path
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:

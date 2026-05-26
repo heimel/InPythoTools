@@ -32,18 +32,11 @@ except ImportError as exc:  # pragma: no cover - dependency checked at runtime
 else:
     _PYQTGRAPH_IMPORT_ERROR = None
 
-try:
-    from .logmsg import logmsg
-    from .nt_change_times import nt_change_times
-    from .nt_load_parameters import nt_load_parameters
-    from .nt_load_tracking_data import nt_load_tracking_data
-    from .nt_open_videos import OpenCVVideoReader, VideoInfo, nt_open_videos
-except ImportError:  # pragma: no cover - supports Spyder sessions run from this folder
-    from inpythotools.logmsg import logmsg
-    from .nt_change_times import nt_change_times
-    from .nt_load_parameters import nt_load_parameters
-    from .nt_load_tracking_data import nt_load_tracking_data
-    from .nt_open_videos import OpenCVVideoReader, VideoInfo, nt_open_videos
+from inpythotools.logmsg import logmsg
+from .nt_change_times import nt_change_times
+from .nt_load_parameters import nt_load_parameters
+from .nt_load_tracking_data import nt_load_tracking_data
+from .nt_open_videos import OpenCVVideoReader, VideoInfo, nt_open_videos
 
 
 _OPEN_WINDOWS: list["NTTrackBehaviorWindow"] = []
