@@ -1,6 +1,11 @@
-# InPythoTools #
+# InPythoTools
 
-InPythoTools are a python-port of some InVivoTools functions.
+InPythoTools contains reusable Python tools that support Python ports of
+Heimel-lab analysis code. It is the Python counterpart to general-purpose
+MATLAB tools from InVivoTools.
+
+NoviTrack-specific analysis code has moved to the `NoviTrack` repository in the
+`novitrack` package. The reusable `inpythotools` package remains here.
 
 ## Installation
 
@@ -22,24 +27,50 @@ When using Spyder, start Spyder from an environment that can connect to this
 kernel, or select the `pyqt6_env` interpreter/kernel in Spyder after installing
 `spyder-kernels`.
 
-## Usage
+## Python path
 
-NoviTrack-specific analysis functions can be imported through the `novitrack`
-namespace:
+Python needs to know where this repository is before `inpythotools` can be
+imported.
+
+For one Python session:
 
 ```python
-import novitrack as nt
+import sys
+sys.path.append(r"C:\Users\alexa\Documents\Porting NoviTrack\InPythoTools")
 
-db = nt.load_mat_database("test_data/nttestdb_examples.mat")
-out = nt.analyse_nttestrecord(db.iloc[-1])
-nt.results_nttestrecord(out)
+from inpythotools import browse_database
 ```
 
-Reusable tools can be imported through the `inpythotools` namespace:
+For one PowerShell or conda terminal session:
+
+```powershell
+conda activate pyqt6_env
+$env:PYTHONPATH = "C:\Users\alexa\Documents\Porting NoviTrack\InPythoTools;$env:PYTHONPATH"
+python
+```
+
+To make this persistent for the conda environment:
+
+```powershell
+conda activate pyqt6_env
+conda env config vars set PYTHONPATH="C:\Users\alexa\Documents\Porting NoviTrack\InPythoTools"
+conda deactivate
+conda activate pyqt6_env
+```
+
+Test the path with:
+
+```powershell
+python -c "from inpythotools import browse_database; print(browse_database)"
+```
+
+## Usage
 
 ```python
 from inpythotools import browse_database
+from inpythotools import load_mat_database
 
+db = load_mat_database("database.mat")
 browse_database(db)
 ```
 
