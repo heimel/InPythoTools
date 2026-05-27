@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEventLoop, Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -709,6 +709,7 @@ def browse_database(
     window_title_prefix: str = "Database browser",
     font_size: int | None = None,
     spacing: int | None = None,
+    block: bool | None = None,
 ) -> DatabaseBrowser:
     """Open a DataFrame database browser and return the window instance.
 
@@ -731,10 +732,17 @@ def browse_database(
         Optional GUI font size in points.
     spacing:
         Optional spacing in pixels between browser controls.
+    block:
+        If true, run a local Qt event loop until the browser window closes. The
+        default is blocking when this call creates the QApplication, and
+        non-blocking when Qt is already running.
     """
     global _LAST_WINDOW
 
+    existing_app = QApplication.instance()
     app = _ensure_qapplication()
+    if block is None:
+        block = existing_app is None
 
     if db is None and filename is not None:
         db = load_mat_database(filename)
@@ -754,6 +762,13 @@ def browse_database(
     app.processEvents()
     _OPEN_WINDOWS.append(window)
     _LAST_WINDOW = window
+    if block:
+        if existing_app is None:
+            app.exec()
+        else:
+            loop = QEventLoop()
+            window.destroyed.connect(loop.quit)
+            loop.exec()
     return window
 
 
