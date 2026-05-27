@@ -74,4 +74,36 @@ db = load_mat_database("database.mat")
 browse_database(db)
 ```
 
+## Local parameter overrides
+
+Local machine-specific analysis settings are stored in a user configuration
+folder, not in the repository. Create or open the file with:
+
+```python
+from inpythotools import edit_local_config
+
+edit_local_config()
+```
+
+To choose a specific editor, for example VS Code:
+
+```python
+edit_local_config(editor="code")
+```
+
+If the `code` command is not available in your Python session, pass the full
+path to the editor instead:
+
+```python
+edit_local_config(editor=r"C:\Users\alexa\AppData\Local\Programs\Microsoft VS Code\Code.exe")
+```
+
+To print the path without opening an editor:
+
+```python
+from inpythotools import local_config_path
+
+print(local_config_path())
+```
+
 Maintainer: Alexander Heimel
