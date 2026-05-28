@@ -1,6 +1,10 @@
 from unittest.mock import patch
+import importlib
 
 from inpythotools.local_config import edit_local_config, ensure_local_config, local_config_path
+from inpythotools.errormsg import errormsg
+
+errormsg_module = importlib.import_module("inpythotools.errormsg")
 
 
 def test_ensure_local_config_creates_processparams_file(tmp_path):
@@ -23,3 +27,18 @@ def test_edit_local_config_accepts_explicit_editor(tmp_path):
 
     assert path == tmp_path / "processparams_local.py"
     popen.assert_called_once_with(["test-editor", str(path)])
+
+
+def test_errormsg_can_raise_without_qt_dialog(monkeypatch):
+    messages = []
+    monkeypatch.setattr(errormsg_module, "_show_error_dialog", lambda message, title: False)
+    monkeypatch.setattr(errormsg_module, "logmsg", lambda message, caller=None: messages.append((message, caller)))
+
+    try:
+        errormsg("problem", halt=True, caller="test_caller")
+    except RuntimeError as exc:
+        assert str(exc) == "problem"
+    else:
+        raise AssertionError("errormsg did not raise")
+
+    assert messages == [("problem", "test_caller")]
