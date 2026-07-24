@@ -158,6 +158,10 @@ def load_mat_database(filename: str | Path) -> pd.DataFrame:
     """Load a MATLAB test database named ``db`` and convert it to a DataFrame."""
     print(f"Loading {filename}")
     db = loadmat_as_dataframe(filename, variable_name="db")
+    if "comment" in db.columns:
+        db["comment"] = db["comment"].map(
+            lambda value: "" if isinstance(value, np.ndarray) and value.size == 0 else value
+        )
     return db
 
 def loadmat_as_dataframe(

@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -38,6 +39,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .mat_database import load_mat_database, save_mat_database
+from .local_config import edit_local_config
 
 
 RecordAction = Callable[[pd.Series], Any]
@@ -203,6 +205,7 @@ class DatabaseBrowser(QMainWindow):
         self.position = _last_record_position(self.filtered_index)
         self._updating_table = False
         self.dirty = False
+        self.load_button: QPushButton | None = None
         self.save_button: QPushButton | None = None
         self.session_folder_resolver = session_folder_resolver
         self.window_title_prefix = window_title_prefix
@@ -239,18 +242,30 @@ class DatabaseBrowser(QMainWindow):
         top_row.setSpacing(self.spacing)
         layout.addLayout(top_row)
 
-        for label, callback in (
-            ("Load", self.load_database),
-            ("Save", self.save_database),
-            ("Export", self.export_database),
-            ("Close figs", self.close_nonpersistent_figures),
-            ("Explore", self.explore_session_folder),
+        for label, callback, standard_icon, tooltip in (
+            ("Load", self.load_database, QStyle.StandardPixmap.SP_DialogOpenButton, "Load database"),
+            ("Save", self.save_database, QStyle.StandardPixmap.SP_DialogSaveButton, "Save database"),
+            ("Export", self.export_database, None, None),
+            (
+                "Close figs",
+                self.close_nonpersistent_figures,
+                QStyle.StandardPixmap.SP_DesktopIcon,
+                "Close figures",
+            ),
+            ("Explore", self.explore_session_folder, None, None),
         ):
-            button = QPushButton(label)
+            button = QPushButton("" if standard_icon is not None else label)
             button.setFixedHeight(control_height)
+            if standard_icon is not None:
+                button.setIcon(self.style().standardIcon(standard_icon))
+                button.setFixedWidth(control_height)
+                button.setToolTip(tooltip)
+                button.setAccessibleName(tooltip)
             button.clicked.connect(callback)
             top_row.addWidget(button)
-            if label == "Save":
+            if label == "Load":
+                self.load_button = button
+            elif label == "Save":
                 self.save_button = button
 
         top_row.addSpacing(self.spacing)
@@ -260,6 +275,11 @@ class DatabaseBrowser(QMainWindow):
             button.clicked.connect(lambda _checked=False, name=label, func=callback: self.run_action(name, func))
             top_row.addWidget(button)
         top_row.addStretch(1)
+        settings_button = QPushButton("Settings")
+        settings_button.setFixedHeight(control_height)
+        settings_button.setToolTip("Edit local configuration")
+        settings_button.clicked.connect(edit_local_config)
+        top_row.addWidget(settings_button)
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(self.spacing)
@@ -271,13 +291,25 @@ class DatabaseBrowser(QMainWindow):
         self.filter_box.returnPressed.connect(self.apply_filter)
         filter_row.addWidget(self.filter_box, stretch=1)
 
-        filter_button = QPushButton("Apply")
+        filter_button = QPushButton()
         filter_button.setFixedHeight(control_height)
+        filter_button.setFixedWidth(control_height)
+        filter_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+        )
+        filter_button.setToolTip("Apply filter")
+        filter_button.setAccessibleName("Apply filter")
         filter_button.clicked.connect(self.apply_filter)
         filter_row.addWidget(filter_button)
 
-        clear_button = QPushButton("Clear")
+        clear_button = QPushButton()
         clear_button.setFixedHeight(control_height)
+        clear_button.setFixedWidth(control_height)
+        clear_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton)
+        )
+        clear_button.setToolTip("Clear filter")
+        clear_button.setAccessibleName("Clear filter")
         clear_button.clicked.connect(self.clear_filter)
         filter_row.addWidget(clear_button)
 
