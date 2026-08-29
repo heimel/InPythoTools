@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from PyQt6.QtCore import QEventLoop, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QEventLoop, QSize, Qt
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -31,7 +31,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -50,6 +49,13 @@ _APP: QApplication | None = None
 _SIMPLE_COMPARISON_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*(==|!=)\s*([^\s'\"]+)\s*$")
 _TRAILING_INT_RE = re.compile(r"^(.*?)(\d+)(\D*)$")
 _PERSISTENT_TAG = "persistent"
+_ICON_SIZE = QSize(24, 24)
+_LUCIDE_ICON_DIR = Path(__file__).with_name("icons") / "lucide"
+
+
+def _lucide_icon(name: str) -> QIcon:
+    """Load a bundled Lucide SVG by its Iconify name."""
+    return QIcon(str(_LUCIDE_ICON_DIR / f"{name}.svg"))
 
 
 def _is_missing(value: Any) -> bool:
@@ -189,6 +195,7 @@ class DatabaseBrowser(QMainWindow):
         *,
         filename: str | Path | None = None,
         actions: Mapping[str, RecordAction] | None = None,
+        action_icons: Mapping[str, str] | None = None,
         session_folder_resolver: SessionFolderResolver | None = None,
         window_title_prefix: str = "Database browser",
         font_size: int | None = None,
@@ -215,6 +222,7 @@ class DatabaseBrowser(QMainWindow):
         if actions is None:
             actions = {}
         self.actions = dict(actions)
+        self.action_icons = dict(action_icons or {})
 
         self._build_ui()
         self._refresh_view()
@@ -227,11 +235,12 @@ class DatabaseBrowser(QMainWindow):
         layout.setContentsMargins(self.spacing, self.spacing, self.spacing, self.spacing)
         layout.setSpacing(self.spacing)
 
+        font = QFont(self.font())
         if self.font_size is not None:
-            font = QFont()
             font.setPointSize(self.font_size)
-            self.setFont(font)
-        control_height = max(22, (self.font_size or 8) + 14)
+        font.setBold(True)
+        self.setFont(font)
+        control_height = max(_ICON_SIZE.height() + 6, (self.font_size or 8) + 14)
         self.setStyleSheet(
             "QPushButton { padding: 1px 6px; } "
             "QLineEdit { padding: 1px 4px; } "
@@ -242,25 +251,16 @@ class DatabaseBrowser(QMainWindow):
         top_row.setSpacing(self.spacing)
         layout.addLayout(top_row)
 
-        for label, callback, standard_icon, tooltip in (
-            ("Load", self.load_database, QStyle.StandardPixmap.SP_DialogOpenButton, "Load database"),
-            ("Save", self.save_database, QStyle.StandardPixmap.SP_DialogSaveButton, "Save database"),
-            ("Export", self.export_database, None, None),
-            (
-                "Close figs",
-                self.close_nonpersistent_figures,
-                QStyle.StandardPixmap.SP_DesktopIcon,
-                "Close figures",
-            ),
-            ("Explore", self.explore_session_folder, None, None),
+        for label, callback, icon_name, accessible_name in (
+            ("Load", self.load_database, "database", "Load database"),
+            ("Save", self.save_database, "save", "Save database"),
+            ("Export", self.export_database, "file-output", "Export database"),
+            ("Close figs", self.close_nonpersistent_figures, "image-off", "Close figures"),
+            ("Explore", self.explore_session_folder, "folder-open", "Explore session folder"),
         ):
-            button = QPushButton("" if standard_icon is not None else label)
+            button = QPushButton()
             button.setFixedHeight(control_height)
-            if standard_icon is not None:
-                button.setIcon(self.style().standardIcon(standard_icon))
-                button.setFixedWidth(control_height)
-                button.setToolTip(tooltip)
-                button.setAccessibleName(tooltip)
+            self.set_button_icon(button, icon_name, accessible_name)
             button.clicked.connect(callback)
             top_row.addWidget(button)
             if label == "Load":
@@ -272,12 +272,15 @@ class DatabaseBrowser(QMainWindow):
         for label, callback in self.actions.items():
             button = QPushButton(label)
             button.setFixedHeight(control_height)
+            icon_name = self.action_icons.get(label)
+            if icon_name is not None:
+                self.set_button_icon(button, icon_name, label)
             button.clicked.connect(lambda _checked=False, name=label, func=callback: self.run_action(name, func))
             top_row.addWidget(button)
         top_row.addStretch(1)
-        settings_button = QPushButton("Settings")
+        settings_button = QPushButton()
         settings_button.setFixedHeight(control_height)
-        settings_button.setToolTip("Edit local configuration")
+        self.set_button_icon(settings_button, "settings", "Settings")
         settings_button.clicked.connect(edit_local_config)
         top_row.addWidget(settings_button)
 
@@ -293,41 +296,31 @@ class DatabaseBrowser(QMainWindow):
 
         filter_button = QPushButton()
         filter_button.setFixedHeight(control_height)
-        filter_button.setFixedWidth(control_height)
-        filter_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
-        )
-        filter_button.setToolTip("Apply filter")
-        filter_button.setAccessibleName("Apply filter")
+        self.set_button_icon(filter_button, "funnel", "Apply filter")
         filter_button.clicked.connect(self.apply_filter)
         filter_row.addWidget(filter_button)
 
         clear_button = QPushButton()
         clear_button.setFixedHeight(control_height)
-        clear_button.setFixedWidth(control_height)
-        clear_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton)
-        )
-        clear_button.setToolTip("Clear filter")
-        clear_button.setAccessibleName("Clear filter")
+        self.set_button_icon(clear_button, "funnel-x", "Clear filter")
         clear_button.clicked.connect(self.clear_filter)
         filter_row.addWidget(clear_button)
 
         nav = QHBoxLayout()
         nav.setSpacing(self.spacing)
         layout.addLayout(nav)
-        for label, callback in (
-            ("|<", self.first_record),
-            ("<", self.previous_record),
-            (">", self.next_record),
-            (">|", self.last_record),
-            ("-", self.delete_current_record),
-            ("+", self.duplicate_current_record),
+        for icon_name, accessible_name, callback in (
+            ("chevrons-left", "First record", self.first_record),
+            ("chevron-left", "Previous record", self.previous_record),
+            ("chevron-right", "Next record", self.next_record),
+            ("chevrons-right", "Last record", self.last_record),
+            ("trash-2", "Delete record", self.delete_current_record),
+            ("copy-plus", "Duplicate record", self.duplicate_current_record),
         ):
-            button = QPushButton(label)
+            button = QPushButton()
             button.setFixedHeight(control_height)
+            self.set_button_icon(button, icon_name, accessible_name)
             button.clicked.connect(callback)
-            button.setFixedWidth(38)
             nav.addWidget(button)
         nav.addStretch(1)
 
@@ -345,6 +338,22 @@ class DatabaseBrowser(QMainWindow):
         layout.addWidget(self.table)
 
         self.resize(300, 560)
+
+    @staticmethod
+    def set_button_icon(
+        button: QPushButton,
+        icon_name: str,
+        accessible_name: str,
+        *,
+        tooltip: str | None = None,
+    ) -> None:
+        """Configure a square button with a bundled 24 px Lucide icon."""
+        button.setText("")
+        button.setIcon(_lucide_icon(icon_name))
+        button.setIconSize(_ICON_SIZE)
+        button.setFixedWidth(max(button.height(), _ICON_SIZE.width() + 6))
+        button.setToolTip(tooltip or accessible_name)
+        button.setAccessibleName(accessible_name)
 
     def current_record_index(self) -> Any | None:
         if not self.filtered_index:
@@ -680,8 +689,10 @@ class DatabaseBrowser(QMainWindow):
         self.table.setRowCount(len(record.index))
         for row, column in enumerate(record.index):
             field_item = QTableWidgetItem(str(column))
+            field_item.setFont(self.table.font())
             field_item.setFlags(field_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             value_item = QTableWidgetItem(_format_value(record[column]))
+            value_item.setFont(self.table.font())
             value_item.setData(Qt.ItemDataRole.UserRole, column)
             self.table.setItem(row, 0, field_item)
             self.table.setItem(row, 1, value_item)
@@ -737,6 +748,7 @@ def browse_database(
     *,
     filename: str | Path | None = None,
     actions: Mapping[str, RecordAction] | None = None,
+    action_icons: Mapping[str, str] | None = None,
     session_folder_resolver: SessionFolderResolver | None = None,
     window_title_prefix: str = "Database browser",
     font_size: int | None = None,
@@ -757,6 +769,8 @@ def browse_database(
         Mapping from button labels to callables. Each callable receives the
         current record as a pandas Series. If it returns a mapping or Series,
         the current row is updated with those values.
+    action_icons:
+        Optional mapping from action labels to bundled Lucide icon names.
     session_folder_resolver:
         Optional callable used by the ``Explore`` button. It receives the current
         record and returns either a path or ``(path, exists)``.
@@ -783,6 +797,7 @@ def browse_database(
         db,
         filename=filename,
         actions=actions,
+        action_icons=action_icons,
         session_folder_resolver=session_folder_resolver,
         window_title_prefix=window_title_prefix,
         font_size=font_size,
