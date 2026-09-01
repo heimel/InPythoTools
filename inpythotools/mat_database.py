@@ -9,6 +9,7 @@ wraps it in a pandas DataFrame.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import os
 from pathlib import Path
 import re
 from typing import Any, Optional
@@ -20,6 +21,27 @@ from scipy.io.matlab import mat_struct
 
 
 _MATLAB_FIELD_RE = re.compile(r"^[A-Za-z]\w*$")
+
+
+def _modification_timestamp_ns(filename: Path) -> int:
+    """Return the file's modification timestamp in nanoseconds."""
+    return filename.stat().st_mtime_ns
+
+
+def _backup_existing_mat_database(filename: Path) -> Path | None:
+    """Move an existing database aside unless its backup is already current."""
+    if not filename.is_file():
+        return None
+
+    backup = Path(f"{filename}_copy")
+    if (
+        backup.is_file()
+        and _modification_timestamp_ns(backup) == _modification_timestamp_ns(filename)
+    ):
+        return backup
+
+    os.replace(filename, backup)
+    return backup
 
 
 def _todict(obj: mat_struct) -> dict[str, Any]:
@@ -319,7 +341,9 @@ def save_mat_database(
     """Save a session DataFrame as a MATLAB struct-array database.
 
     Each row becomes one MATLAB struct in ``variable_name``. Columns become
-    struct fields, including nested dictionaries such as ``measures``.
+    struct fields, including nested dictionaries such as ``measures``. Before
+    overwriting an existing file, its current contents are moved to a sibling
+    file whose name ends in ``_copy``.
     """
     if not isinstance(db, pd.DataFrame):
         raise TypeError("save_mat_database expects a pandas DataFrame.")
@@ -329,6 +353,7 @@ def save_mat_database(
     mat_db = _records_to_mat_struct_array(records)
 
     filename = Path(filename)
+    _backup_existing_mat_database(filename)
     savemat(
         filename,
         {variable_name: mat_db},
