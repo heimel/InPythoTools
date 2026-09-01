@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -69,3 +71,48 @@ def test_save_failure_leaves_original_database_in_backup(tmp_path, monkeypatch):
     assert not filename.exists()
     backup = tmp_path / "database.mat_copy"
     assert load_mat_database(backup).loc[0, "comment"] == "old"
+
+
+def test_save_failure_restores_database_after_creating_broken_file(
+    tmp_path, monkeypatch
+):
+    filename = tmp_path / "database.mat"
+    save_mat_database(pd.DataFrame([{"comment": "old"}]), filename)
+
+    def fail_after_creating_file(output_filename, *args, **kwargs):
+        Path(output_filename).write_bytes(b"broken")
+        raise OSError("failed after creating file")
+
+    monkeypatch.setattr(mat_database, "savemat", fail_after_creating_file)
+
+    with pytest.raises(OSError, match="failed after creating file"):
+        save_mat_database(pd.DataFrame([{"comment": "new"}]), filename)
+
+    backup = tmp_path / "database.mat_copy"
+    assert load_mat_database(filename).loc[0, "comment"] == "old"
+    assert load_mat_database(backup).loc[0, "comment"] == "old"
+
+
+def test_save_mat_database_round_trips_list_of_empty_records(tmp_path):
+    filename = tmp_path / "database.mat"
+    db = pd.DataFrame(
+        [
+            {
+                "measures": {
+                    "event": {
+                        "opto_off": {
+                            "Channel1_green": {"parameters": [{}, {}]},
+                        }
+                    }
+                }
+            }
+        ]
+    )
+
+    save_mat_database(db, filename)
+
+    loaded = load_mat_database(filename)
+    parameters = loaded.loc[0, "measures"]["event"]["opto_off"][
+        "Channel1_green"
+    ]["parameters"]
+    assert parameters == [{}, {}]

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 import os
 from pathlib import Path
 import re
+import shutil
 from typing import Any, Optional
 
 import numpy as np
@@ -282,6 +283,11 @@ def _records_to_mat_struct_array(records: list[Mapping[str, Any]]) -> np.ndarray
     """Convert a list of dictionaries into a MATLAB-compatible struct array."""
     if not records:
         return np.empty((0, 0), dtype=object)
+    if all(not record for record in records):
+        # NumPy represents a struct array with no fields as dtype([]), which
+        # scipy.io.savemat cannot write. An object array round-trips these as a
+        # MATLAB cell array containing the same number of empty structs.
+        return np.asarray([{} for _ in records], dtype=object)
 
     field_names = list(records[0].keys())
     for field_name in field_names:
@@ -343,7 +349,8 @@ def save_mat_database(
     Each row becomes one MATLAB struct in ``variable_name``. Columns become
     struct fields, including nested dictionaries such as ``measures``. Before
     overwriting an existing file, its current contents are moved to a sibling
-    file whose name ends in ``_copy``.
+    file whose name ends in ``_copy``. If saving creates a broken file before
+    failing, the backup is copied back while the save exception is re-raised.
     """
     if not isinstance(db, pd.DataFrame):
         raise TypeError("save_mat_database expects a pandas DataFrame.")
@@ -353,10 +360,19 @@ def save_mat_database(
     mat_db = _records_to_mat_struct_array(records)
 
     filename = Path(filename)
-    _backup_existing_mat_database(filename)
-    savemat(
-        filename,
-        {variable_name: mat_db},
-        do_compression=do_compression,
-        long_field_names=True,
-    )
+    backup = _backup_existing_mat_database(filename)
+    try:
+        savemat(
+            filename,
+            {variable_name: mat_db},
+            do_compression=do_compression,
+            long_field_names=True,
+        )
+    except Exception:
+        if backup is not None and backup.is_file() and filename.exists():
+            try:
+                shutil.copy2(backup, filename)
+            except OSError:
+                # Do not hide the original save error from the caller.
+                pass
+        raise
