@@ -58,6 +58,12 @@ def _lucide_icon(name: str) -> QIcon:
     return QIcon(str(_LUCIDE_ICON_DIR / f"{name}.svg"))
 
 
+def _suggested_export_filename(filename: str | Path | None) -> Path:
+    """Return a safe default filename for a database export."""
+    source = Path(filename) if filename is not None else Path.cwd() / "db.mat"
+    return source.with_name(f"{source.stem}_exported{source.suffix}")
+
+
 def _is_missing(value: Any) -> bool:
     if isinstance(value, (np.ndarray, list, tuple, dict)):
         return False
@@ -290,7 +296,7 @@ class DatabaseBrowser(QMainWindow):
         filter_row.addWidget(QLabel("Filter"))
         self.filter_box = QLineEdit()
         self.filter_box.setFixedHeight(control_height)
-        self.filter_box.setPlaceholderText("subject == 102394")
+        self.filter_box.setPlaceholderText("subject == '102394'")
         self.filter_box.returnPressed.connect(self.apply_filter)
         filter_row.addWidget(self.filter_box, stretch=1)
 
@@ -410,7 +416,7 @@ class DatabaseBrowser(QMainWindow):
         filename, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Export database",
-            str(self.filename if self.filename else Path.cwd() / "db.mat"),
+            str(_suggested_export_filename(self.filename)),
             "MATLAB database (*.mat);;Python pickle (*.pkl *.pickle);;Excel workbook (*.xlsx);;CSV file (*.csv);;All files (*.*)",
         )
         if not filename:

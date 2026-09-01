@@ -6,6 +6,14 @@ import inpythotools.database_browser as database_browser
 from inpythotools.database_browser import DatabaseBrowser
 
 
+def test_suggested_export_filename_appends_exported_before_extension(tmp_path):
+    source = tmp_path / "database.mat"
+
+    assert database_browser._suggested_export_filename(source) == (
+        tmp_path / "database_exported.mat"
+    )
+
+
 def test_database_browser_uses_bundled_24_px_icons():
     app = QApplication.instance() or QApplication([])
     window = DatabaseBrowser(pd.DataFrame())
