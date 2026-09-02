@@ -28,7 +28,6 @@ def test_database_browser_uses_bundled_24_px_icons():
         "Save database",
         "Close figures",
         "Apply filter",
-        "Clear filter",
         "Export database",
         "Explore session folder",
         "Settings",
@@ -52,6 +51,46 @@ def test_database_browser_uses_bundled_24_px_icons():
     app.processEvents()
 
 
+def test_filter_button_switches_between_apply_edit_and_disable_states():
+    app = QApplication.instance() or QApplication([])
+    window = DatabaseBrowser(
+        pd.DataFrame([{"subject": "mouse-1"}, {"subject": "mouse-2"}])
+    )
+    button = window.filter_button
+
+    assert button.accessibleName() == "Apply filter"
+    assert button.toolTip() == "Apply filter"
+
+    window.filter_box.setText("subject == 'mouse-1'")
+    button.click()
+    assert window.filtered_index == [0]
+    assert button.accessibleName() == "Disable filter"
+    assert button.toolTip() == "Disable filter"
+
+    window.filter_box.setText("subject == 'mouse-2'")
+    assert window.filtered_index == [0]
+    assert button.accessibleName() == "Apply filter"
+    assert button.toolTip() == "Apply filter"
+
+    button.click()
+    assert window.filtered_index == [1]
+    assert button.accessibleName() == "Disable filter"
+    assert window._has_active_filter()
+
+    button.click()
+    assert window.filter_box.text() == "subject == 'mouse-2'"
+    assert window.filtered_index == [0, 1]
+    assert button.accessibleName() == "Apply filter"
+    assert not window._has_active_filter()
+
+    button.click()
+    assert window.filtered_index == [1]
+    assert button.accessibleName() == "Disable filter"
+
+    window.close()
+    app.processEvents()
+
+
 def test_database_browser_text_is_bold():
     app = QApplication.instance() or QApplication([])
     window = DatabaseBrowser(pd.DataFrame([{"subject": "mouse-1"}]))
@@ -61,7 +100,21 @@ def test_database_browser_text_is_bold():
     assert window.status_label.font().bold()
     assert window.table.font().bold()
     assert window.table.item(0, 0).font().bold()
-    assert window.table.item(0, 1).font().bold()
+    assert not window.table.item(0, 1).font().bold()
+
+    window.close()
+    app.processEvents()
+
+
+def test_button_rows_use_half_the_configured_horizontal_spacing():
+    app = QApplication.instance() or QApplication([])
+    window = DatabaseBrowser(pd.DataFrame(), spacing=6)
+    layout = window.centralWidget().layout()
+
+    assert layout.spacing() == 6
+    assert layout.itemAt(0).layout().spacing() == 3
+    assert layout.itemAt(1).layout().spacing() == 6
+    assert layout.itemAt(2).layout().spacing() == 3
 
     window.close()
     app.processEvents()

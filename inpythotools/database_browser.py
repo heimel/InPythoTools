@@ -204,6 +204,7 @@ class DatabaseBrowser(QMainWindow):
         action_icons: Mapping[str, str] | None = None,
         session_folder_resolver: SessionFolderResolver | None = None,
         window_title_prefix: str = "Database browser",
+        window_icon: str | Path | QIcon | None = None,
         font_size: int | None = None,
         spacing: int | None = None,
         parent: QWidget | None = None,
@@ -220,10 +221,19 @@ class DatabaseBrowser(QMainWindow):
         self.dirty = False
         self.load_button: QPushButton | None = None
         self.save_button: QPushButton | None = None
+        self.filter_button: QPushButton | None = None
+        self._active_filter_expression: str | None = None
         self.session_folder_resolver = session_folder_resolver
         self.window_title_prefix = window_title_prefix
         self.font_size = font_size
         self.spacing = spacing if spacing is not None else 2
+        if window_icon is not None:
+            icon = (
+                window_icon
+                if isinstance(window_icon, QIcon)
+                else QIcon(str(window_icon))
+            )
+            self.setWindowIcon(icon)
 
         if actions is None:
             actions = {}
@@ -252,9 +262,10 @@ class DatabaseBrowser(QMainWindow):
             "QLineEdit { padding: 1px 4px; } "
             "QTableWidget::item { padding: 0px 3px; }"
         )
+        button_spacing = max(0, self.spacing // 2)
 
         top_row = QHBoxLayout()
-        top_row.setSpacing(self.spacing)
+        top_row.setSpacing(button_spacing)
         layout.addLayout(top_row)
 
         for label, callback, icon_name, accessible_name in (
@@ -274,7 +285,7 @@ class DatabaseBrowser(QMainWindow):
             elif label == "Save":
                 self.save_button = button
 
-        top_row.addSpacing(self.spacing)
+        top_row.addSpacing(button_spacing)
         for label, callback in self.actions.items():
             button = QPushButton(label)
             button.setFixedHeight(control_height)
@@ -300,20 +311,15 @@ class DatabaseBrowser(QMainWindow):
         self.filter_box.returnPressed.connect(self.apply_filter)
         filter_row.addWidget(self.filter_box, stretch=1)
 
-        filter_button = QPushButton()
-        filter_button.setFixedHeight(control_height)
-        self.set_button_icon(filter_button, "funnel", "Apply filter")
-        filter_button.clicked.connect(self.apply_filter)
-        filter_row.addWidget(filter_button)
-
-        clear_button = QPushButton()
-        clear_button.setFixedHeight(control_height)
-        self.set_button_icon(clear_button, "funnel-x", "Clear filter")
-        clear_button.clicked.connect(self.clear_filter)
-        filter_row.addWidget(clear_button)
+        self.filter_button = QPushButton()
+        self.filter_button.setFixedHeight(control_height)
+        self.filter_button.clicked.connect(self._toggle_filter)
+        self.filter_box.textChanged.connect(self._update_filter_button)
+        self._update_filter_button()
+        filter_row.addWidget(self.filter_button)
 
         nav = QHBoxLayout()
-        nav.setSpacing(self.spacing)
+        nav.setSpacing(button_spacing)
         layout.addLayout(nav)
         for icon_name, accessible_name, callback in (
             ("chevrons-left", "First record", self.first_record),
@@ -387,6 +393,7 @@ class DatabaseBrowser(QMainWindow):
             self.filtered_index = list(self.db.index)
             self.position = _last_record_position(self.filtered_index)
             self.dirty = False
+            self._active_filter_expression = None
             self.filter_box.clear()
             self._refresh_view()
             self._update_window_state()
@@ -502,6 +509,7 @@ class DatabaseBrowser(QMainWindow):
         self.db = pd.concat([before, new_row, after], sort=False)
         self.filtered_index = list(self.db.index)
         self.position = self.filtered_index.index(new_index)
+        self._active_filter_expression = None
         self.filter_box.clear()
         self._set_dirty(True)
         self._refresh_view()
@@ -551,7 +559,7 @@ class DatabaseBrowser(QMainWindow):
             QMessageBox.information(self, "Explore unavailable", f"Folder path:\n{folder}")
 
     def _has_active_filter(self) -> bool:
-        return len(self.filtered_index) != len(self.db.index) or bool(self.filter_box.text().strip())
+        return self._active_filter_expression is not None
 
     def _confirm_delete_indexes(self, current_index: Any) -> list[Any]:
         if self._has_active_filter() and len(self.filtered_index) > 1:
@@ -611,13 +619,45 @@ class DatabaseBrowser(QMainWindow):
             return
         self.filtered_index = list(filtered.index)
         self.position = 0
+        self._active_filter_expression = expression
+        self._update_filter_button()
         self._refresh_view()
 
     def clear_filter(self) -> None:
+        self._active_filter_expression = None
         self.filter_box.clear()
         self.filtered_index = list(self.db.index)
         self.position = 0
         self._refresh_view()
+
+    def disable_filter(self) -> None:
+        self._active_filter_expression = None
+        self.filtered_index = list(self.db.index)
+        self.position = 0
+        self._update_filter_button()
+        self._refresh_view()
+
+    def _toggle_filter(self) -> None:
+        expression = self.filter_box.text().strip()
+        if (
+            self._active_filter_expression is not None
+            and expression == self._active_filter_expression
+        ):
+            self.disable_filter()
+        else:
+            self.apply_filter()
+
+    def _update_filter_button(self) -> None:
+        if self.filter_button is None:
+            return
+        expression = self.filter_box.text().strip()
+        if (
+            self._active_filter_expression is not None
+            and expression == self._active_filter_expression
+        ):
+            self.set_button_icon(self.filter_button, "funnel-x", "Disable filter")
+        else:
+            self.set_button_icon(self.filter_button, "funnel", "Apply filter")
 
     def first_record(self) -> None:
         self._move_to(0)
@@ -698,7 +738,9 @@ class DatabaseBrowser(QMainWindow):
             field_item.setFont(self.table.font())
             field_item.setFlags(field_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             value_item = QTableWidgetItem(_format_value(record[column]))
-            value_item.setFont(self.table.font())
+            value_font = QFont(self.table.font())
+            value_font.setBold(False)
+            value_item.setFont(value_font)
             value_item.setData(Qt.ItemDataRole.UserRole, column)
             self.table.setItem(row, 0, field_item)
             self.table.setItem(row, 1, value_item)
@@ -724,7 +766,7 @@ class DatabaseBrowser(QMainWindow):
         self._update_window_state()
 
     def _update_window_state(self) -> None:
-        filename = self.filename.name if self.filename is not None else "Untitled"
+        filename = self.filename.stem if self.filename is not None else "Untitled"
         marker = "*" if self.dirty else ""
         self.setWindowTitle(f"{self.window_title_prefix} - {filename}{marker}")
         if self.save_button is not None:
@@ -757,6 +799,7 @@ def browse_database(
     action_icons: Mapping[str, str] | None = None,
     session_folder_resolver: SessionFolderResolver | None = None,
     window_title_prefix: str = "Database browser",
+    window_icon: str | Path | QIcon | None = None,
     font_size: int | None = None,
     spacing: int | None = None,
     block: bool | None = None,
@@ -780,6 +823,8 @@ def browse_database(
     session_folder_resolver:
         Optional callable used by the ``Explore`` button. It receives the current
         record and returns either a path or ``(path, exists)``.
+    window_icon:
+        Optional icon for this window. The generic browser has no custom icon.
     font_size:
         Optional GUI font size in points.
     spacing:
@@ -806,6 +851,7 @@ def browse_database(
         action_icons=action_icons,
         session_folder_resolver=session_folder_resolver,
         window_title_prefix=window_title_prefix,
+        window_icon=window_icon,
         font_size=font_size,
         spacing=spacing,
     )
