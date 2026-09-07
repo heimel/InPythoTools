@@ -1,6 +1,6 @@
 """Reusable Python tools used by NoviTrack ports."""
 
-from .database_browser import DatabaseBrowser, browse_database
+from .database_browser import DatabaseBrowser, browse_database, close_figures
 from .errormsg import errormsg
 from .ivt_sem import ivt_sem
 from .local_config import edit_local_config, ensure_local_config, local_config_path, user_config_dir
@@ -21,4 +21,5 @@ __all__ = [
     "logmsg",
     "save_mat_database",
     "user_config_dir",
+    "close_figures"
 ]

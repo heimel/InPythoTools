@@ -871,12 +871,29 @@ def browse_database(
     return window
 
 
+def close_figures() -> int:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover - matplotlib is a runtime dependency
+        return 0
+
+    closed = 0
+    for number in plt.get_fignums():
+        figure = plt.figure(number)
+        if _has_persistent_tag(figure):
+            continue
+        plt.close(figure)
+        closed += 1
+
+    return closed
+
+
 NTDatabaseBrowser = DatabaseBrowser
 nt_browse_database = browse_database
 browse_nt_database = browse_database
 
 
-__all__ = ["DatabaseBrowser", "NTDatabaseBrowser", "browse_database", "browse_nt_database", "nt_browse_database"]
+__all__ = ["DatabaseBrowser", "NTDatabaseBrowser", "browse_database", "browse_nt_database", "nt_browse_database", "close_figures"]
 
 
 def _main() -> int:
