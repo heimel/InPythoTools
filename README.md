@@ -20,7 +20,7 @@ conda activate pyqt6_env
 Install the remaining dependencies with:
 
 ```bash
-conda install -y -c conda-forge pandas scipy matplotlib statsmodels pytest openpyxl nptdms pyqtgraph opencv spyder-kernels pyyaml
+conda install -y -c conda-forge pandas scipy matplotlib statsmodels pytest openpyxl nptdms pyqtgraph opencv spyder-kernels pyyaml pymupdf
 ```
 
 When using Spyder, start Spyder from an environment that can connect to this
